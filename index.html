@@ -153,11 +153,16 @@
                             setMappingFileName(file.name);
                             mappingFound = true;
                         } else {
-                            const dateMatch = file.name.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+                            // Flexible Regex to handle various delimiters and padding in filenames
+                            const dateMatch = file.name.match(/(\d{4})[./\-_](\d{1,2})[./\-_](\d{1,2})/);
                             let fileDate;
                             if (dateMatch) {
-                                fileDate = `${dateMatch[1]}-${dateMatch[2].padStart(2, '0')}-${dateMatch[3].padStart(2, '0')}`;
+                                const y = dateMatch[1];
+                                const m = dateMatch[2].padStart(2, '0');
+                                const d = dateMatch[3].padStart(2, '0');
+                                fileDate = `${y}-${m}-${d}`;
                             } else {
+                                // Last resort: use system date if filename has no date
                                 fileDate = new Date(file.lastModified).toISOString().split('T')[0];
                             }
                             const parsedRows = jsonData.map(row => mapRowToStock(row, fileDate)).filter(Boolean);
@@ -247,22 +252,23 @@
                 const counts = {};
                 const depth = drillPath.length;
                 filteredStocks.forEach(s => {
-                    let label = depth === 0 ? s.sector : depth === 1 ? s.industry : s.stockName;
+                    // Change: Use NSE Code instead of Stock Name at company level (depth 2)
+                    let label = depth === 0 ? s.sector : depth === 1 ? s.industry : s.nseCode;
                     if (label) counts[label] = (counts[label] || 0) + 1;
                 });
                 return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
             }, [filteredStocks, drillPath]);
 
-            // New: Top Stock Hits Data
             const topHitsData = useMemo(() => {
                 const counts = {};
                 filteredStocks.forEach(s => {
-                    counts[s.stockName] = (counts[s.stockName] || 0) + 1;
+                    // Change: Use NSE Code for the frequency chart
+                    counts[s.nseCode] = (counts[s.nseCode] || 0) + 1;
                 });
                 return Object.entries(counts)
                     .map(([name, value]) => ({ name, value }))
                     .sort((a, b) => b.value - a.value)
-                    .slice(0, 30); // Top 30 stocks
+                    .slice(0, 30); 
             }, [filteredStocks]);
 
             const sortedTableData = useMemo(() => {
@@ -327,7 +333,7 @@
                                 <div className="flex items-center gap-3">
                                     <input type="number" value={minDeliveryPct} onChange={e => setMinDeliveryPct(Number(e.target.value))} className="w-full text-center text-4xl font-black text-blue-600 bg-slate-50 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-blue-100" />
                                 </div>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase mt-3 text-center tracking-tighter">Applied to Weekly & Monthly Avg</p>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase mt-3 text-center tracking-tighter">Applied to Week & Month Avg</p>
                             </div>
                             
                             <div className="xl:col-span-9 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-center">
@@ -364,7 +370,7 @@
                                             <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white" title="To" />
                                         </div>
                                     )}
-                                    {timeFrameMode === 'all' && <p className="text-xs font-bold text-slate-400 italic">Historical global search across all connected records...</p>}
+                                    {timeFrameMode === 'all' && <p className="text-xs font-bold text-slate-400 italic">Showing all data from the uploaded files...</p>}
                                 </div>
                             </div>
                         </div>
@@ -375,17 +381,16 @@
                             <div className="flex flex-col md:flex-row gap-4 border-b border-slate-200 pb-2">
                                 <div className="flex gap-8">
                                     <button onClick={() => setActiveTab('dashboard')} className={`pb-4 text-sm font-black transition-all relative ${activeTab === 'dashboard' ? 'text-blue-600' : 'text-slate-400'}`}>Visual Analytics {activeTab === 'dashboard' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}</button>
-                                    <button onClick={() => setActiveTab('table')} className={`pb-4 text-sm font-black transition-all relative ${activeTab === 'table' ? 'text-blue-600' : 'text-slate-400'}`}>Data Table {activeTab === 'table' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}</button>
+                                    <button onClick={() => setActiveTab('table')} className={`pb-4 text-sm font-black transition-all relative ${activeTab === 'table' ? 'text-blue-600' : 'text-slate-400'}`}>Detailed Data {activeTab === 'table' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}</button>
                                 </div>
                                 <div className="flex-1 relative">
                                      <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                                     <input type="text" placeholder="Quick stock search..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-white border border-slate-100 rounded-full text-xs font-bold outline-none focus:ring-2 focus:ring-blue-100 shadow-sm" />
+                                     <input type="text" placeholder="Quick search..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-white border border-slate-100 rounded-full text-xs font-bold outline-none focus:ring-2 focus:ring-blue-100 shadow-sm" />
                                 </div>
                             </div>
 
                             {activeTab === 'dashboard' ? (
                                 <div className="grid grid-cols-1 gap-8">
-                                    {/* Drill-down Hierarchy Chart */}
                                     <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm min-h-[550px] chart-container">
                                         <div className="flex items-center justify-between mb-8">
                                             <div className="flex flex-wrap items-center gap-1">
@@ -401,37 +406,36 @@
                                                 <button onClick={() => resetToLevel(drillPath.length - 2)} className="text-xs font-black text-slate-400 flex items-center gap-1 hover:text-blue-600 transition-colors"><ArrowLeftIcon /> Back</button>
                                             )}
                                         </div>
-                                        <div className="h-[400px]">
+                                        <div className="h-[450px]">
                                             <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={drillChartData} layout="vertical" onClick={data => data?.activeLabel && drillPath.length < 2 && setDrillPath([...drillPath, data.activeLabel])} margin={{ right: 120, left: 20 }}>
+                                                <BarChart data={drillChartData} layout="vertical" onClick={data => data?.activeLabel && drillPath.length < 2 && setDrillPath([...drillPath, data.activeLabel])} margin={{ right: 140, left: 20 }}>
                                                     <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={false} stroke="#f1f5f9" />
-                                                    <XAxis type="number" tick={{fontSize: 9, fontWeight: 800}} stroke="#cbd5e1" domain={[0, (max) => Math.ceil(max * 1.25)]} />
+                                                    <XAxis type="number" tick={{fontSize: 9, fontWeight: 800}} stroke="#cbd5e1" domain={[0, (max) => Math.ceil(max * 1.3)]} />
                                                     <YAxis type="category" dataKey="name" width={160} tick={{fontSize: 10, fontWeight: 800}} interval={0} />
                                                     <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '20px', border: 'none', fontWeight: 900}} />
                                                     <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={25}>
                                                         {drillChartData.map((entry, index) => <Cell key={`c-${index}`} fill={COLORS[index % COLORS.length]} className="cursor-pointer hover:opacity-80" />)}
-                                                        <LabelList dataKey="value" position="right" style={{fontSize: '11px', fontWeight: 900, fill: '#1e293b'}} offset={10} />
+                                                        <LabelList dataKey="value" position="right" style={{fontSize: '11px', fontWeight: 900, fill: '#1e293b'}} offset={12} />
                                                     </Bar>
                                                 </BarChart>
                                             </ResponsiveContainer>
                                         </div>
-                                        <div className="mt-4 text-center"><p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">Sector → Industry → Company Drill-down</p></div>
+                                        <div className="mt-4 text-center"><p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">Drill-down Hierarchy</p></div>
                                     </div>
 
-                                    {/* Overall Stock Hit Frequency Chart */}
                                     <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm min-h-[550px] chart-container">
                                         <h3 className="text-xl font-black text-slate-800 mb-8 uppercase tracking-tight flex items-center gap-3">
-                                            <Icon name="bar-chart-3" className="text-blue-600" /> Top Stock Hit Frequency
+                                            <Icon name="bar-chart-3" className="text-blue-600" /> Stock Occurrence Frequency (NSE Codes)
                                         </h3>
                                         <div className="h-[600px]">
                                             <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={topHitsData} layout="vertical" margin={{ right: 120, left: 20 }}>
+                                                <BarChart data={topHitsData} layout="vertical" margin={{ right: 140, left: 20 }}>
                                                     <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={false} stroke="#f1f5f9" />
-                                                    <XAxis type="number" tick={{fontSize: 9, fontWeight: 800}} stroke="#cbd5e1" domain={[0, (max) => Math.ceil(max * 1.25)]} />
+                                                    <XAxis type="number" tick={{fontSize: 9, fontWeight: 800}} stroke="#cbd5e1" domain={[0, (max) => Math.ceil(max * 1.3)]} />
                                                     <YAxis type="category" dataKey="name" width={160} tick={{fontSize: 10, fontWeight: 800}} interval={0} />
                                                     <Tooltip contentStyle={{borderRadius: '20px', border: 'none', fontWeight: 900}} />
                                                     <Bar dataKey="value" fill="#3b82f6" radius={[0, 6, 6, 0]} barSize={16}>
-                                                        <LabelList dataKey="value" position="right" style={{fontSize: '11px', fontWeight: 900, fill: '#1e293b'}} offset={10} />
+                                                        <LabelList dataKey="value" position="right" style={{fontSize: '11px', fontWeight: 900, fill: '#1e293b'}} offset={12} />
                                                     </Bar>
                                                 </BarChart>
                                             </ResponsiveContainer>
@@ -482,8 +486,10 @@
                             <div className="bg-blue-600 text-white p-10 rounded-[2.5rem] shadow-2xl mb-10 shadow-blue-500/40">
                                 <Icon name="folder-open" size={64} />
                             </div>
-                            <h2 className="text-5xl font-black text-slate-800 mb-3 tracking-tight">Alpha Analytics</h2>
-                            <p className="text-slate-400 font-bold max-w-sm mb-12 text-lg">Connect your folder with daily Nifty exports and your <span className="text-blue-600 underline">sector.xlsx</span> mapping.</p>
+                            <h2 className="text-5xl font-black text-slate-800 mb-3 tracking-tight">Alpha Insights</h2>
+                            <p className="text-slate-400 font-bold max-w-sm mb-12 text-lg leading-relaxed">
+                                Select your folder with daily data and <span className="text-blue-600 underline">sector.xlsx</span> mapping.
+                            </p>
                             <button onClick={handleSelectFolder} className="bg-slate-900 hover:bg-slate-800 text-white px-12 py-5 rounded-[2rem] font-black flex items-center gap-3 shadow-xl transition-all active:scale-95 text-lg">
                                 {isProcessing ? <Icon name="loader-2" className="animate-spin" /> : <Icon name="play" />} {isProcessing ? 'Crunching...' : 'Select Folder'}
                             </button>
