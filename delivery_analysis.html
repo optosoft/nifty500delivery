@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nifty 500 Alpha Analytics</title>
+    <!-- Essential Libraries -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+    <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; overflow-x: hidden; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .chart-container .recharts-cartesian-axis-tick-value {
+            font-weight: 800;
+            fill: #475569;
+        }
+        .table-scroll::-webkit-scrollbar { height: 6px; }
+        .table-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
+        .table-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect, useCallback, useRef } = React;
+        const { 
+            BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+            Cell, LabelList 
+        } = window.Recharts;
+
+        // SVG Icons to prevent Lucide initialization crashes during state changes
+        const ChevronRight = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-slate-300"><path d="m9 18 6-6-6-6"/></svg>;
+        const ArrowLeftIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>;
+
+        const Icon = ({ name, size = 18, className = "" }) => {
+            const iconRef = useRef(null);
+            useEffect(() => {
+                if (window.lucide && iconRef.current) {
+                    window.lucide.createIcons({
+                        attrs: { class: className, width: size, height: size },
+                        nameAttr: 'data-lucide',
+                        icons: window.lucide.icons
+                    });
+                }
+            }, [name, size, className]);
+            return <i ref={iconRef} data-lucide={name} className={className} style={{ width: size, height: size, display: 'inline-block' }}></i>;
+        };
+
+        const App = () => {
+            const [rawData, setRawData] = useState([]);
+            const [sectorIndustryMap, setSectorIndustryMap] = useState({}); 
+            const [mappingFileName, setMappingFileName] = useState('');
+            const [directoryHandle, setDirectoryHandle] = useState(null);
+            const [errorMessage, setErrorMessage] = useState('');
+            
+            const [minWeekDelivery, setMinWeekDelivery] = useState(60); 
+            const [minMonthDelivery, setMinMonthDelivery] = useState(60); 
+            const [timeFrameMode, setTimeFrameMode] = useState('all'); 
+            const [startDate, setStartDate] = useState('');
+            const [endDate, setEndDate] = useState('');
+            const [searchQuery, setSearchQuery] = useState('');
+            
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [isProcessing, setIsProcessing] = useState(false);
+            const [drillPath, setDrillPath] = useState([]); 
+            const [sortConfig, setSortConfig] = useState({ key: 'hits', direction: 'desc' });
+
+            const fallbackInputRef = useRef(null);
+            const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#475569', '#14b8a6', '#f43f5e'];
+
+            const mapRowToStock = (row, date) => {
+                const getVal = (key) => row[key];
+                const nseCode = getVal('NSE code')?.toString().trim();
+                if (!nseCode) return null; 
+
+                return {
+                    date,
+                    stockName: getVal('Stock Name') || 'Unknown Stock',
+                    nseCode: nseCode,
+                    deliveryEod: parseFloat(getVal('Delivery% volume end of day')) || 0,
+                    deliveryAvgWeek: parseFloat(getVal('Delivery% volume Avg Week')) || 0,
+                    deliveryAvgMonth: parseFloat(getVal('Delivery% volume Avg Month')) || 0,
+                    deliveryAvg6Month: parseFloat(getVal('Delivery% volume Avg 6Month')) || 0,
+                };
+            };
+
+            const processFiles = useCallback(async (filesList) => {
+                setIsProcessing(true);
+                setErrorMessage('');
+                const newRawData = [];
+                let mappingFound = false;
+
+                try {
+                    for (const file of filesList) {
+                        const fileName = file.name.toLowerCase();
+                        if (!(fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv'))) continue;
+
+                        const data = await file.arrayBuffer();
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+
+                        if (fileName === 'sector.xlsx') {
+                            const newMap = {};
+                            jsonData.forEach(row => {
+                                const code = row['NSE code'] || row['Symbol'] || row['NSE Code'];
+                                if (code) {
+                                    newMap[code.toString().trim()] = { 
+                                        sector: (row['Sector'] || row['sector_name'] || 'Uncategorized').toString().trim(), 
+                                        industry: (row['Industry'] || row['Industry Name'] || 'Uncategorized').toString().trim() 
+                                    };
+                                }
+                            });
+                            setSectorIndustryMap(newMap);
+                            setMappingFileName(file.name);
+                            mappingFound = true;
+                        } else {
+                            const dateMatch = file.name.match(/(\d{4}-\d{2}-\d{2})/);
+                            const fileDate = dateMatch ? dateMatch[0] : new Date(file.lastModified).toISOString().split('T')[0];
+                            const parsedRows = jsonData.map(row => mapRowToStock(row, fileDate)).filter(Boolean);
+                            newRawData.push(...parsedRows);
+                        }
+                    }
+                    if (newRawData.length === 0) {
+                        setErrorMessage('No valid data files found.');
+                    } else {
+                        setRawData(newRawData);
+                        if (!mappingFound) {
+                            setMappingFileName('');
+                            setSectorIndustryMap({});
+                        }
+                    }
+                } catch (err) {
+                    setErrorMessage('Failed to process files. Ensure files are valid Excel/CSV.');
+                } finally {
+                    setIsProcessing(false);
+                }
+            }, []);
+
+            const handleSelectFolder = async () => {
+                if (window.showDirectoryPicker) {
+                    try {
+                        const handle = await window.showDirectoryPicker();
+                        const files = [];
+                        for await (const entry of handle.values()) {
+                            if (entry.kind === 'file') files.push(await entry.getFile());
+                        }
+                        setDirectoryHandle(handle);
+                        await processFiles(files);
+                    } catch (e) {}
+                } else {
+                    fallbackInputRef.current?.click();
+                }
+            };
+
+            const processedStocks = useMemo(() => {
+                return rawData.map(stock => {
+                    const mapping = sectorIndustryMap[stock.nseCode];
+                    return {
+                        ...stock,
+                        sector: mapping ? mapping.sector : (mappingFileName ? 'Not in Mapping' : 'Pending Mapping'),
+                        industry: mapping ? mapping.industry : (mappingFileName ? 'Not in Mapping' : 'Pending Mapping')
+                    };
+                });
+            }, [rawData, sectorIndustryMap, mappingFileName]);
+
+            const filteredStocks = useMemo(() => {
+                const now = new Date();
+                const getLimitDate = (days) => {
+                    const d = new Date();
+                    d.setDate(now.getDate() - days);
+                    return d.toISOString().split('T')[0];
+                };
+
+                return processedStocks.filter(stock => {
+                    if (timeFrameMode !== 'all') {
+                        if (timeFrameMode === 'daily' && stock.date < getLimitDate(1)) return false;
+                        if (timeFrameMode === 'weekly' && stock.date < getLimitDate(7)) return false;
+                        if (timeFrameMode === 'monthly' && stock.date < getLimitDate(30)) return false;
+                        if (timeFrameMode === 'quarterly' && stock.date < getLimitDate(90)) return false;
+                        if (timeFrameMode === 'yearly' && stock.date < getLimitDate(365)) return false;
+                        if (timeFrameMode === 'custom') {
+                            if (startDate && stock.date < startDate) return false;
+                            if (endDate && stock.date > endDate) return false;
+                        }
+                    }
+                    const meetsCriteria = stock.deliveryEod > stock.deliveryAvg6Month && 
+                                          stock.deliveryAvgWeek >= minWeekDelivery && 
+                                          stock.deliveryAvgMonth >= minMonthDelivery;
+                    if (!meetsCriteria) return false;
+                    
+                    if (drillPath.length >= 1 && stock.sector !== drillPath[0]) return false;
+                    if (drillPath.length >= 2 && stock.industry !== drillPath[1]) return false;
+
+                    const search = searchQuery.toLowerCase();
+                    return stock.stockName.toLowerCase().includes(search) ||
+                           stock.nseCode.toLowerCase().includes(search);
+                });
+            }, [processedStocks, minWeekDelivery, minMonthDelivery, timeFrameMode, startDate, endDate, searchQuery, drillPath]);
+
+            const appearanceCounts = useMemo(() => {
+                const counts = {};
+                filteredStocks.forEach(s => { counts[s.nseCode] = (counts[s.nseCode] || 0) + 1; });
+                return counts;
+            }, [filteredStocks]);
+
+            const chartData = useMemo(() => {
+                const counts = {};
+                const depth = drillPath.length;
+                filteredStocks.forEach(s => {
+                    let label = depth === 0 ? s.sector : depth === 1 ? s.industry : s.stockName;
+                    if (label) counts[label] = (counts[label] || 0) + 1;
+                });
+                return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
+            }, [filteredStocks, drillPath]);
+
+            const sortedTableData = useMemo(() => {
+                const data = [...filteredStocks];
+                if (sortConfig.key) {
+                    data.sort((a, b) => {
+                        let aV, bV;
+                        if (sortConfig.key === 'hits') {
+                            aV = appearanceCounts[a.nseCode] || 0;
+                            bV = appearanceCounts[b.nseCode] || 0;
+                        } else {
+                            aV = a[sortConfig.key];
+                            bV = b[sortConfig.key];
+                        }
+                        
+                        if (typeof aV === 'number' && typeof bV === 'number') {
+                            if (aV === bV) return b.date.localeCompare(a.date);
+                            return sortConfig.direction === 'asc' ? aV - bV : bV - aV;
+                        }
+                        return sortConfig.direction === 'asc' ? String(aV).localeCompare(String(bV)) : String(bV).localeCompare(String(aV));
+                    });
+                }
+                return data;
+            }, [filteredStocks, sortConfig, appearanceCounts]);
+
+            const handleChartClick = (data) => {
+                if (!data || !data.activeLabel || drillPath.length >= 2) return;
+                setDrillPath(prev => [...prev, data.activeLabel]);
+            };
+
+            const navigateTo = (index) => {
+                if (index === -1) setDrillPath([]);
+                else setDrillPath(prev => prev.slice(0, index + 1));
+            };
+
+            const chartLayout = chartData.length > 12 ? 'vertical' : 'horizontal';
+
+            return (
+                <div className="p-4 md:p-8 max-w-7xl mx-auto">
+                    <input type="file" ref={fallbackInputRef} webkitdirectory="true" directory="true" multiple className="hidden" onChange={(e) => processFiles(Array.from(e.target.files))} />
+
+                    <header className="flex flex-col md:flex-row justify-between items-center mb-8 bg-white p-6 rounded-3xl shadow-sm border border-slate-100 gap-4">
+                        <div className="text-center md:text-left">
+                            <h1 className="text-3xl font-black text-slate-800 tracking-tight">Nifty Alpha Dashboard</h1>
+                            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">
+                                {mappingFileName ? `Active Mapping: ${mappingFileName}` : 'Waiting for sector.xlsx'}
+                            </p>
+                        </div>
+                        <div className="flex gap-3">
+                            {directoryHandle && (
+                                <button onClick={() => handleSelectFolder()} className="bg-white border border-slate-200 text-slate-600 px-5 py-3 rounded-2xl font-bold flex items-center gap-2 transition-all hover:bg-slate-50">
+                                    <Icon name="refresh-cw" size={16} className={isProcessing ? 'animate-spin' : ''} />
+                                    Refresh
+                                </button>
+                            )}
+                            <button onClick={handleSelectFolder} className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-2xl font-black shadow-lg shadow-blue-100 flex items-center gap-2 transition-all active:scale-95">
+                                <Icon name="folder-open" /> Select Folder
+                            </button>
+                        </div>
+                    </header>
+
+                    {errorMessage && (
+                        <div className="bg-red-50 border border-red-200 p-4 rounded-2xl mb-8 text-red-700 text-sm font-bold flex items-center gap-2">
+                            <Icon name="alert-circle" /> {errorMessage}
+                        </div>
+                    )}
+
+                    {rawData.length > 0 && (
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm text-center">
+                                <label className="text-[10px] font-black text-slate-500 uppercase mb-2 block tracking-widest text-center">Min Week Delivery %</label>
+                                <input type="number" value={minWeekDelivery} onChange={e => setMinWeekDelivery(Number(e.target.value))} className="w-full text-center text-2xl font-black bg-slate-50 p-2 rounded-xl outline-none" />
+                            </div>
+                            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm text-center">
+                                <label className="text-[10px] font-black text-slate-500 uppercase mb-2 block tracking-widest text-center">Min Month Delivery %</label>
+                                <input type="number" value={minMonthDelivery} onChange={e => setMinMonthDelivery(Number(e.target.value))} className="w-full text-center text-2xl font-black bg-slate-50 p-2 rounded-xl outline-none" />
+                            </div>
+                            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm md:col-span-2 flex flex-col justify-center items-center">
+                                <div className="flex flex-wrap gap-1.5 justify-center">
+                                    {['all', 'daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'custom'].map(m => (
+                                        <button key={m} onClick={() => setTimeFrameMode(m)} className={`px-3 py-1 rounded-full text-[9px] font-black uppercase transition-all ${timeFrameMode === m ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>{m}</button>
+                                    ))}
+                                </div>
+                                {timeFrameMode === 'custom' && (
+                                    <div className="flex gap-2 mt-3">
+                                        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="text-[10px] font-bold p-1 bg-slate-50 rounded border-none" />
+                                        <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="text-[10px] font-bold p-1 bg-slate-50 rounded border-none" />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {rawData.length > 0 && (
+                        <div className="space-y-6">
+                            <div className="flex flex-col md:flex-row gap-4 border-b border-slate-200 pb-2">
+                                <div className="flex gap-8">
+                                    <button onClick={() => setActiveTab('dashboard')} className={`pb-4 text-sm font-black relative ${activeTab === 'dashboard' ? 'text-blue-600' : 'text-slate-400'}`}>Visual Drill-down {activeTab === 'dashboard' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}</button>
+                                    <button onClick={() => setActiveTab('table')} className={`pb-4 text-sm font-black relative ${activeTab === 'table' ? 'text-blue-600' : 'text-slate-400'}`}>Detailed Table {activeTab === 'table' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}</button>
+                                </div>
+                                <div className="flex-1 relative">
+                                     <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                     <input type="text" placeholder="Search stocks or codes..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-white border border-slate-100 rounded-full text-xs font-bold outline-none shadow-sm focus:ring-2 focus:ring-blue-100" />
+                                </div>
+                            </div>
+
+                            {activeTab === 'dashboard' ? (
+                                <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm min-h-[600px] chart-container">
+                                    <div className="flex items-center justify-between mb-8">
+                                        <div className="flex flex-wrap items-center gap-2 no-scrollbar">
+                                            <button onClick={() => navigateTo(-1)} className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all ${drillPath.length === 0 ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>All Sectors</button>
+                                            {drillPath.map((p, i) => (
+                                                <React.Fragment key={i}>
+                                                    <ChevronRight />
+                                                    <button onClick={() => navigateTo(i)} className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all ${i === drillPath.length - 1 ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>{p}</button>
+                                                </React.Fragment>
+                                            ))}
+                                        </div>
+                                        {drillPath.length > 0 && (
+                                            <button onClick={() => navigateTo(drillPath.length - 2)} className="text-xs font-black text-slate-400 flex items-center gap-1 hover:text-blue-600 transition-colors">
+                                                <ArrowLeftIcon /> Back
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    <div className="h-[450px]">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <BarChart data={chartData} layout={chartLayout} onClick={handleChartClick}>
+                                                <CartesianGrid strokeDasharray="3 3" vertical={chartLayout === 'vertical'} horizontal={chartLayout === 'horizontal'} stroke="#f1f5f9" />
+                                                <XAxis 
+                                                    type={chartLayout === 'vertical' ? 'number' : 'category'} 
+                                                    dataKey={chartLayout === 'vertical' ? undefined : 'name'} 
+                                                    interval={0} 
+                                                    tick={{fontSize: 9, fontWeight: 800}} 
+                                                    angle={chartLayout === 'horizontal' ? -40 : 0} 
+                                                    textAnchor={chartLayout === 'horizontal' ? 'end' : 'middle'} 
+                                                    height={chartLayout === 'horizontal' ? 100 : 30} 
+                                                />
+                                                <YAxis 
+                                                    type={chartLayout === 'vertical' ? 'category' : 'number'} 
+                                                    dataKey={chartLayout === 'vertical' ? 'name' : undefined} 
+                                                    width={chartLayout === 'vertical' ? 160 : 40} 
+                                                    tick={{fontSize: 9, fontWeight: 800}} 
+                                                />
+                                                <Tooltip contentStyle={{borderRadius: '20px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 900}} />
+                                                <Bar dataKey="value" radius={chartLayout === 'vertical' ? [0, 6, 6, 0] : [6, 6, 0, 0]} barSize={chartData.length > 10 ? 20 : 40}>
+                                                    {chartData.map((entry, index) => (
+                                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} className="cursor-pointer hover:opacity-80 transition-opacity" />
+                                                    ))}
+                                                    <LabelList dataKey="value" position={chartLayout === 'vertical' ? 'right' : 'top'} style={{fontSize: '10px', fontWeight: 900, fill: '#1e293b'}} />
+                                                </Bar>
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                    <div className="mt-4 text-center">
+                                        <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.2em]">
+                                            {drillPath.length === 0 ? 'Top Level: Sectors' : drillPath.length === 1 ? 'Mid Level: Industries' : 'Detail Level: Individual Stocks'}
+                                        </p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                                    <div className="overflow-x-auto table-scroll">
+                                        <table className="w-full text-left border-collapse">
+                                            <thead className="bg-slate-50/80 border-b border-slate-100 text-[10px] font-black uppercase text-slate-400 tracking-widest">
+                                                <tr>
+                                                    {[
+                                                        {key: 'date', label: 'Date'},
+                                                        {key: 'stockName', label: 'Stock'},
+                                                        {key: 'sector', label: 'Sector / Industry'},
+                                                        {key: 'hits', label: 'Hits (Freq)'},
+                                                        {key: 'deliveryEod', label: 'Delivery EOD'}
+                                                    ].map(h => (
+                                                        <th key={h.key} className="p-6 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => setSortConfig({key: h.key, direction: sortConfig.direction === 'asc' ? 'desc' : 'asc'})}>
+                                                            <div className="flex items-center gap-1">
+                                                                {h.label}
+                                                                {sortConfig.key === h.key && <Icon name={sortConfig.direction === 'asc' ? 'arrow-up' : 'arrow-down'} size={10} className="text-blue-600" />}
+                                                            </div>
+                                                        </th>
+                                                    ))}
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {sortedTableData.map((s, i) => (
+                                                    <tr key={i} className="hover:bg-blue-50/40 transition-colors group">
+                                                        <td className="p-6 text-[10px] font-black text-slate-400">{s.date}</td>
+                                                        <td className="p-6">
+                                                            <div className="font-black text-slate-800 text-sm tracking-tight">{s.stockName}</div>
+                                                            <div className="text-[10px] font-mono font-black text-blue-600 uppercase tracking-tighter">{s.nseCode}</div>
+                                                        </td>
+                                                        <td className="p-6">
+                                                            <div className="text-xs font-black text-slate-700">{s.sector}</div>
+                                                            <div className="text-[10px] font-bold text-slate-400">{s.industry}</div>
+                                                        </td>
+                                                        <td className="p-6 text-center font-black">
+                                                            <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs border border-blue-100 shadow-sm">{appearanceCounts[s.nseCode]}</span>
+                                                        </td>
+                                                        <td className="p-6 font-black text-emerald-600 text-sm">{s.deliveryEod}%</td>
+                                                    </tr>
+                                                ))}
+                                                {sortedTableData.length === 0 && (
+                                                    <tr><td colSpan="5" className="p-20 text-center font-black text-slate-300">No data found in selected scope.</td></tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {rawData.length === 0 && (
+                        <div className="h-[75vh] flex flex-col items-center justify-center text-center">
+                            <div className="bg-blue-600 text-white p-8 rounded-[2.5rem] shadow-2xl mb-10 shadow-blue-500/40">
+                                <Icon name="folder-open" size={56} />
+                            </div>
+                            <h2 className="text-4xl font-black text-slate-800 mb-3 tracking-tight">Alpha Insights</h2>
+                            <p className="text-slate-400 font-bold max-w-sm mb-10 leading-relaxed px-4">
+                                Select your local folder containing Nifty files and <span className="text-blue-600 underline">sector.xlsx</span>.
+                            </p>
+                            <button onClick={handleSelectFolder} className="bg-slate-900 hover:bg-slate-800 text-white px-10 py-5 rounded-[2rem] font-black flex items-center gap-3 shadow-xl transition-all active:scale-95">
+                                {isProcessing ? <Icon name="loader-2" className="animate-spin" /> : <Icon name="play" />} {isProcessing ? 'Loading Data...' : 'Connect Folder'}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
