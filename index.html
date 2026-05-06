@@ -25,6 +25,8 @@
         .table-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
         .table-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
         .breadcrumb-item:last-child { pointer-events: none; }
+        input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.6; }
+        input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
     </style>
 </head>
 <body>
@@ -37,7 +39,6 @@
             Cell, LabelList 
         } = window.Recharts;
 
-        // Static SVG Icons for critical UI stability
         const ChevronRight = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-slate-300 mx-1"><path d="m9 18 6-6-6-6"/></svg>;
         const ArrowLeftIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="mr-1.5"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>;
         const SortIcon = ({ direction }) => (
@@ -67,13 +68,20 @@
             const [directoryHandle, setDirectoryHandle] = useState(null);
             const [errorMessage, setErrorMessage] = useState('');
             
+            // Filter states
             const [minWeekDelivery, setMinWeekDelivery] = useState(60); 
             const [minMonthDelivery, setMinMonthDelivery] = useState(60); 
+            
+            // Granular timeframe states
             const [timeFrameMode, setTimeFrameMode] = useState('all'); 
+            const [selectedDate, setSelectedDate] = useState('');
             const [startDate, setStartDate] = useState('');
             const [endDate, setEndDate] = useState('');
-            const [searchQuery, setSearchQuery] = useState('');
+            const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+            const [selectedQuarter, setSelectedQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
+            const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
             
+            const [searchQuery, setSearchQuery] = useState('');
             const [activeTab, setActiveTab] = useState('dashboard');
             const [isProcessing, setIsProcessing] = useState(false);
             const [drillPath, setDrillPath] = useState([]); 
@@ -81,6 +89,19 @@
 
             const fallbackInputRef = useRef(null);
             const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#475569', '#14b8a6', '#f43f5e'];
+
+            const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+            const quarters = [
+                { label: "Q1 (Jan-Mar)", val: 1, months: [0, 1, 2] },
+                { label: "Q2 (Apr-Jun)", val: 2, months: [3, 4, 5] },
+                { label: "Q3 (Jul-Sep)", val: 3, months: [6, 7, 8] },
+                { label: "Q4 (Oct-Dec)", val: 4, months: [9, 10, 11] }
+            ];
+
+            const availableYears = useMemo(() => {
+                const years = [...new Set(rawData.map(d => new Date(d.date).getFullYear()))];
+                return years.sort((a, b) => b - a);
+            }, [rawData]);
 
             const mapRowToStock = (row, date) => {
                 const getVal = (key) => row[key];
@@ -178,25 +199,27 @@
             }, [rawData, sectorIndustryMap, mappingFileName]);
 
             const filteredStocks = useMemo(() => {
-                const now = new Date();
-                const getLimitDate = (days) => {
-                    const d = new Date();
-                    d.setDate(now.getDate() - days);
-                    return d.toISOString().split('T')[0];
-                };
-
                 return processedStocks.filter(stock => {
-                    if (timeFrameMode !== 'all') {
-                        if (timeFrameMode === 'daily' && stock.date < getLimitDate(1)) return false;
-                        if (timeFrameMode === 'weekly' && stock.date < getLimitDate(7)) return false;
-                        if (timeFrameMode === 'monthly' && stock.date < getLimitDate(30)) return false;
-                        if (timeFrameMode === 'quarterly' && stock.date < getLimitDate(90)) return false;
-                        if (timeFrameMode === 'yearly' && stock.date < getLimitDate(365)) return false;
-                        if (timeFrameMode === 'custom') {
-                            if (startDate && stock.date < startDate) return false;
-                            if (endDate && stock.date > endDate) return false;
-                        }
+                    const d = new Date(stock.date);
+                    const y = d.getFullYear();
+                    const m = d.getMonth();
+                    
+                    if (timeFrameMode === 'date' && selectedDate && stock.date !== selectedDate) return false;
+                    if (timeFrameMode === 'month') {
+                        if (m !== parseInt(selectedMonth)) return false;
+                        if (y !== parseInt(selectedYear)) return false;
                     }
+                    if (timeFrameMode === 'quarter') {
+                        const qMonths = quarters.find(q => q.val === parseInt(selectedQuarter)).months;
+                        if (!qMonths.includes(m)) return false;
+                        if (y !== parseInt(selectedYear)) return false;
+                    }
+                    if (timeFrameMode === 'year' && y !== parseInt(selectedYear)) return false;
+                    if (timeFrameMode === 'custom') {
+                        if (startDate && stock.date < startDate) return false;
+                        if (endDate && stock.date > endDate) return false;
+                    }
+
                     const meetsCriteria = stock.deliveryEod > stock.deliveryAvg6Month && 
                                           stock.deliveryAvgWeek >= minWeekDelivery && 
                                           stock.deliveryAvgMonth >= minMonthDelivery;
@@ -209,7 +232,7 @@
                     return stock.stockName.toLowerCase().includes(search) ||
                            stock.nseCode.toLowerCase().includes(search);
                 });
-            }, [processedStocks, minWeekDelivery, minMonthDelivery, timeFrameMode, startDate, endDate, searchQuery, drillPath]);
+            }, [processedStocks, minWeekDelivery, minMonthDelivery, timeFrameMode, selectedDate, startDate, endDate, selectedMonth, selectedQuarter, selectedYear, searchQuery, drillPath]);
 
             const appearanceCounts = useMemo(() => {
                 const counts = {};
@@ -300,27 +323,93 @@
                     )}
 
                     {rawData.length > 0 && (
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm text-center">
-                                <label className="text-[10px] font-black text-slate-500 uppercase mb-2 block tracking-widest text-center">Min Week Delivery %</label>
-                                <input type="number" value={minWeekDelivery} onChange={e => setMinWeekDelivery(Number(e.target.value))} className="w-full text-center text-2xl font-black bg-slate-50 p-2 rounded-xl outline-none" />
+                        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 mb-8">
+                            <div className="xl:col-span-3 bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col gap-4">
+                                <div className="flex-1">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase mb-1.5 block tracking-widest">Min Week %</label>
+                                    <input type="number" value={minWeekDelivery} onChange={e => setMinWeekDelivery(Number(e.target.value))} className="w-full text-center text-xl font-black bg-slate-50 p-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-100 transition-all outline-none" />
+                                </div>
+                                <div className="flex-1">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase mb-1.5 block tracking-widest">Min Month %</label>
+                                    <input type="number" value={minMonthDelivery} onChange={e => setMinMonthDelivery(Number(e.target.value))} className="w-full text-center text-xl font-black bg-slate-50 p-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-100 transition-all outline-none" />
+                                </div>
                             </div>
-                            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm text-center">
-                                <label className="text-[10px] font-black text-slate-500 uppercase mb-2 block tracking-widest text-center">Min Month Delivery %</label>
-                                <input type="number" value={minMonthDelivery} onChange={e => setMinMonthDelivery(Number(e.target.value))} className="w-full text-center text-2xl font-black bg-slate-50 p-2 rounded-xl outline-none" />
-                            </div>
-                            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm md:col-span-2 flex flex-col justify-center items-center">
-                                <div className="flex flex-wrap gap-1.5 justify-center mt-1">
-                                    {['all', 'daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'custom'].map(m => (
-                                        <button key={m} onClick={() => setTimeFrameMode(m)} className={`px-3 py-1 rounded-full text-[9px] font-black uppercase transition-all ${timeFrameMode === m ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>{m}</button>
+                            
+                            <div className="xl:col-span-9 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-center">
+                                <div className="flex flex-wrap gap-1.5 mb-4">
+                                    {[
+                                        {id: 'all', label: 'All'},
+                                        {id: 'date', label: 'Date Picker'},
+                                        {id: 'month', label: 'Month'},
+                                        {id: 'quarter', label: 'Quarter'},
+                                        {id: 'year', label: 'Year'},
+                                        {id: 'custom', label: 'Custom Range'}
+                                    ].map(m => (
+                                        <button 
+                                            key={m.id} 
+                                            onClick={() => setTimeFrameMode(m.id)}
+                                            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${timeFrameMode === m.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                                        >
+                                            {m.label}
+                                        </button>
                                     ))}
                                 </div>
-                                {timeFrameMode === 'custom' && (
-                                    <div className="flex gap-2 mt-3">
-                                        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="text-[10px] font-bold p-1 bg-slate-50 rounded border-none shadow-inner" />
-                                        <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="text-[10px] font-bold p-1 bg-slate-50 rounded border-none shadow-inner" />
-                                    </div>
-                                )}
+
+                                <div className="bg-slate-50 p-4 rounded-2xl flex flex-wrap items-end gap-4 min-h-[80px]">
+                                    {timeFrameMode === 'date' && (
+                                        <div className="flex flex-col">
+                                            <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">Select Specific Date</label>
+                                            <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white" />
+                                        </div>
+                                    )}
+
+                                    {(timeFrameMode === 'month' || timeFrameMode === 'quarter' || timeFrameMode === 'year') && (
+                                        <div className="flex flex-col">
+                                            <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">Year</label>
+                                            <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white">
+                                                {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                                                {availableYears.length === 0 && <option value={new Date().getFullYear()}>{new Date().getFullYear()}</option>}
+                                            </select>
+                                        </div>
+                                    )}
+
+                                    {timeFrameMode === 'month' && (
+                                        <div className="flex flex-col">
+                                            <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">Month</label>
+                                            <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white">
+                                                {months.map((m, i) => <option key={m} value={i}>{m}</option>)}
+                                            </select>
+                                        </div>
+                                    )}
+
+                                    {timeFrameMode === 'quarter' && (
+                                        <div className="flex flex-col">
+                                            <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">Quarter</label>
+                                            <select value={selectedQuarter} onChange={e => setSelectedQuarter(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white">
+                                                {quarters.map(q => <option key={q.val} value={q.val}>{q.label}</option>)}
+                                            </select>
+                                        </div>
+                                    )}
+
+                                    {timeFrameMode === 'custom' && (
+                                        <>
+                                            <div className="flex flex-col">
+                                                <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">From</label>
+                                                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white" />
+                                            </div>
+                                            <div className="flex flex-col">
+                                                <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">To</label>
+                                                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white" />
+                                            </div>
+                                        </>
+                                    )}
+
+                                    {timeFrameMode === 'all' && (
+                                        <div className="h-full flex items-center">
+                                            <p className="text-xs font-bold text-slate-400 italic">Showing all data from the connected folder...</p>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     )}
@@ -376,13 +465,14 @@
                                                 data={chartData} 
                                                 layout="vertical"
                                                 onClick={handleChartClick}
-                                                margin={{ top: 20, right: 60, left: 20, bottom: 20 }}
+                                                margin={{ top: 20, right: 80, left: 20, bottom: 20 }}
                                             >
                                                 <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={false} stroke="#f1f5f9" />
                                                 <XAxis 
                                                     type="number" 
                                                     tick={{fontSize: 9, fontWeight: 800}} 
                                                     stroke="#cbd5e1"
+                                                    domain={[0, (dataMax) => Math.ceil(dataMax * 1.15)]} // Add 15% padding to prevent label clipping
                                                 />
                                                 <YAxis 
                                                     type="category" 
