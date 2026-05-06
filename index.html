@@ -135,7 +135,7 @@
                         }
                     }
                     if (newRawData.length === 0) {
-                        setErrorMessage('No valid data files found.');
+                        setErrorMessage('No valid data files found in folder.');
                     } else {
                         setRawData(newRawData);
                         if (!mappingFound) {
@@ -269,8 +269,6 @@
                 }));
             };
 
-            const chartLayout = chartData.length > 12 ? 'vertical' : 'horizontal';
-
             return (
                 <div className="p-4 md:p-8 max-w-7xl mx-auto">
                     <input type="file" ref={fallbackInputRef} webkitdirectory="true" directory="true" multiple className="hidden" onChange={(e) => processFiles(Array.from(e.target.files))} />
@@ -279,7 +277,7 @@
                         <div className="text-center md:text-left">
                             <h1 className="text-3xl font-black text-slate-800 tracking-tight">Nifty Alpha Dashboard</h1>
                             <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">
-                                {mappingFileName ? `Active Mapping: ${mappingFileName}` : 'Awaiting sector.xlsx to categorize'}
+                                {mappingFileName ? `Active Mapping: ${mappingFileName}` : 'Requires sector.xlsx to categorize'}
                             </p>
                         </div>
                         <div className="flex gap-3">
@@ -304,11 +302,11 @@
                     {rawData.length > 0 && (
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                             <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm text-center">
-                                <label className="text-[10px] font-black text-slate-500 uppercase mb-2 block tracking-widest text-center">Min Week %</label>
+                                <label className="text-[10px] font-black text-slate-500 uppercase mb-2 block tracking-widest text-center">Min Week Delivery %</label>
                                 <input type="number" value={minWeekDelivery} onChange={e => setMinWeekDelivery(Number(e.target.value))} className="w-full text-center text-2xl font-black bg-slate-50 p-2 rounded-xl outline-none" />
                             </div>
                             <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm text-center">
-                                <label className="text-[10px] font-black text-slate-500 uppercase mb-2 block tracking-widest text-center">Min Month %</label>
+                                <label className="text-[10px] font-black text-slate-500 uppercase mb-2 block tracking-widest text-center">Min Month Delivery %</label>
                                 <input type="number" value={minMonthDelivery} onChange={e => setMinMonthDelivery(Number(e.target.value))} className="w-full text-center text-2xl font-black bg-slate-50 p-2 rounded-xl outline-none" />
                             </div>
                             <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm md:col-span-2 flex flex-col justify-center items-center">
@@ -374,29 +372,31 @@
 
                                     <div className="h-[450px]">
                                         <ResponsiveContainer width="100%" height="100%">
-                                            <BarChart data={chartData} layout={chartLayout} onClick={handleChartClick}>
-                                                <CartesianGrid strokeDasharray="3 3" vertical={chartLayout === 'vertical'} horizontal={chartLayout === 'horizontal'} stroke="#f1f5f9" />
+                                            <BarChart 
+                                                data={chartData} 
+                                                layout="vertical"
+                                                onClick={handleChartClick}
+                                                margin={{ top: 20, right: 60, left: 20, bottom: 20 }}
+                                            >
+                                                <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={false} stroke="#f1f5f9" />
                                                 <XAxis 
-                                                    type={chartLayout === 'vertical' ? 'number' : 'category'} 
-                                                    dataKey={chartLayout === 'vertical' ? undefined : 'name'} 
-                                                    interval={0} 
+                                                    type="number" 
                                                     tick={{fontSize: 9, fontWeight: 800}} 
-                                                    angle={chartLayout === 'horizontal' ? -40 : 0} 
-                                                    textAnchor={chartLayout === 'horizontal' ? 'end' : 'middle'} 
-                                                    height={chartLayout === 'horizontal' ? 100 : 30} 
+                                                    stroke="#cbd5e1"
                                                 />
                                                 <YAxis 
-                                                    type={chartLayout === 'vertical' ? 'category' : 'number'} 
-                                                    dataKey={chartLayout === 'vertical' ? 'name' : undefined} 
-                                                    width={chartLayout === 'vertical' ? 160 : 40} 
-                                                    tick={{fontSize: 9, fontWeight: 800}} 
+                                                    type="category" 
+                                                    dataKey="name" 
+                                                    width={160} 
+                                                    tick={{fontSize: 10, fontWeight: 800}} 
+                                                    interval={0}
                                                 />
-                                                <Tooltip contentStyle={{borderRadius: '20px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 900}} />
-                                                <Bar dataKey="value" radius={chartLayout === 'vertical' ? [0, 6, 6, 0] : [6, 6, 0, 0]} barSize={chartData.length > 10 ? 20 : 40}>
+                                                <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '20px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 900}} />
+                                                <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={chartData.length > 10 ? 20 : 40}>
                                                     {chartData.map((entry, index) => (
                                                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} className="cursor-pointer hover:opacity-80 transition-opacity" />
                                                     ))}
-                                                    <LabelList dataKey="value" position={chartLayout === 'vertical' ? 'right' : 'top'} style={{fontSize: '10px', fontWeight: 900, fill: '#1e293b'}} />
+                                                    <LabelList dataKey="value" position="right" style={{fontSize: '11px', fontWeight: 900, fill: '#1e293b'}} />
                                                 </Bar>
                                             </BarChart>
                                         </ResponsiveContainer>
