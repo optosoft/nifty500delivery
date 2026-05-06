@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nifty 500 Alpha Analytics</title>
-    <!-- Essential Libraries - Fixed Loading Order -->
+    <!-- Essential Libraries -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
@@ -24,6 +24,7 @@
         .table-scroll::-webkit-scrollbar { height: 6px; }
         .table-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
         .table-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .breadcrumb-item:last-child { pointer-events: none; }
     </style>
 </head>
 <body>
@@ -36,7 +37,7 @@
             Cell, LabelList 
         } = window.Recharts;
 
-        // Static SVG Icons to ensure zero-crash navigation and sorting
+        // Static SVG Icons for critical UI stability
         const ChevronRight = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-slate-300 mx-1"><path d="m9 18 6-6-6-6"/></svg>;
         const ArrowLeftIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="mr-1.5"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>;
         const SortIcon = ({ direction }) => (
@@ -67,10 +68,9 @@
             const [errorMessage, setErrorMessage] = useState('');
             
             // Filter states
-            const [minWeekDelivery, setMinWeekDelivery] = useState(60); 
-            const [minMonthDelivery, setMinMonthDelivery] = useState(60); 
+            const [minDeliveryPct, setMinDeliveryPct] = useState(60); 
             
-            // Granular timeframe states
+            // Timeframe states
             const [timeFrameMode, setTimeFrameMode] = useState('all'); 
             const [selectedDate, setSelectedDate] = useState('');
             const [startDate, setStartDate] = useState('');
@@ -97,14 +97,10 @@
             ];
 
             const availableYears = useMemo(() => {
-                const years = [...new Set(rawData.map(d => {
-                    const parts = d.date.split('-');
-                    return parseInt(parts[0]);
-                }))];
+                const years = [...new Set(rawData.map(d => parseInt(d.date.split('-')[0])))];
                 return years.sort((a, b) => b - a);
             }, [rawData]);
 
-            // Set dynamic defaults when data loads
             useEffect(() => {
                 if (availableYears.length > 0 && !availableYears.includes(selectedYear)) {
                     setSelectedYear(availableYears[0]);
@@ -157,14 +153,10 @@
                             setMappingFileName(file.name);
                             mappingFound = true;
                         } else {
-                            // Enhanced Regex to capture YYYY-MM-DD even if not zero-padded
                             const dateMatch = file.name.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
                             let fileDate;
                             if (dateMatch) {
-                                const y = dateMatch[1];
-                                const m = dateMatch[2].padStart(2, '0');
-                                const d = dateMatch[3].padStart(2, '0');
-                                fileDate = `${y}-${m}-${d}`;
+                                fileDate = `${dateMatch[1]}-${dateMatch[2].padStart(2, '0')}-${dateMatch[3].padStart(2, '0')}`;
                             } else {
                                 fileDate = new Date(file.lastModified).toISOString().split('T')[0];
                             }
@@ -172,17 +164,13 @@
                             newRawData.push(...parsedRows);
                         }
                     }
-                    if (newRawData.length === 0) {
-                        setErrorMessage('No valid data files found in folder.');
-                    } else {
-                        setRawData(newRawData);
-                        if (!mappingFound) {
-                            setMappingFileName('');
-                            setSectorIndustryMap({});
-                        }
+                    setRawData(newRawData);
+                    if (!mappingFound) {
+                        setMappingFileName('');
+                        setSectorIndustryMap({});
                     }
                 } catch (err) {
-                    setErrorMessage('Failed to read files. Ensure files are valid Excel or CSV.');
+                    setErrorMessage('Error reading data folder.');
                 } finally {
                     setIsProcessing(false);
                 }
@@ -219,17 +207,15 @@
                 return processedStocks.filter(stock => {
                     const dateParts = stock.date.split('-');
                     const y = parseInt(dateParts[0]);
-                    const m = parseInt(dateParts[1]) - 1; // 0-indexed
+                    const m = parseInt(dateParts[1]) - 1;
                     
                     if (timeFrameMode === 'date' && selectedDate && stock.date !== selectedDate) return false;
                     if (timeFrameMode === 'month') {
-                        if (m !== parseInt(selectedMonth)) return false;
-                        if (y !== parseInt(selectedYear)) return false;
+                        if (m !== parseInt(selectedMonth) || y !== parseInt(selectedYear)) return false;
                     }
                     if (timeFrameMode === 'quarter') {
                         const qMonths = quarters.find(q => q.val === parseInt(selectedQuarter)).months;
-                        if (!qMonths.includes(m)) return false;
-                        if (y !== parseInt(selectedYear)) return false;
+                        if (!qMonths.includes(m) || y !== parseInt(selectedYear)) return false;
                     }
                     if (timeFrameMode === 'year' && y !== parseInt(selectedYear)) return false;
                     if (timeFrameMode === 'custom') {
@@ -238,8 +224,8 @@
                     }
 
                     const meetsCriteria = stock.deliveryEod > stock.deliveryAvg6Month && 
-                                          stock.deliveryAvgWeek >= minWeekDelivery && 
-                                          stock.deliveryAvgMonth >= minMonthDelivery;
+                                          stock.deliveryAvgWeek >= minDeliveryPct && 
+                                          stock.deliveryAvgMonth >= minDeliveryPct;
                     if (!meetsCriteria) return false;
                     
                     if (drillPath.length >= 1 && stock.sector !== drillPath[0]) return false;
@@ -249,7 +235,7 @@
                     return stock.stockName.toLowerCase().includes(search) ||
                            stock.nseCode.toLowerCase().includes(search);
                 });
-            }, [processedStocks, minWeekDelivery, minMonthDelivery, timeFrameMode, selectedDate, startDate, endDate, selectedMonth, selectedQuarter, selectedYear, searchQuery, drillPath]);
+            }, [processedStocks, minDeliveryPct, timeFrameMode, selectedDate, startDate, endDate, selectedMonth, selectedQuarter, selectedYear, searchQuery, drillPath]);
 
             const appearanceCounts = useMemo(() => {
                 const counts = {};
@@ -257,7 +243,7 @@
                 return counts;
             }, [filteredStocks]);
 
-            const chartData = useMemo(() => {
+            const drillChartData = useMemo(() => {
                 const counts = {};
                 const depth = drillPath.length;
                 filteredStocks.forEach(s => {
@@ -267,10 +253,21 @@
                 return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
             }, [filteredStocks, drillPath]);
 
+            // New: Top Stock Hits Data
+            const topHitsData = useMemo(() => {
+                const counts = {};
+                filteredStocks.forEach(s => {
+                    counts[s.stockName] = (counts[s.stockName] || 0) + 1;
+                });
+                return Object.entries(counts)
+                    .map(([name, value]) => ({ name, value }))
+                    .sort((a, b) => b.value - a.value)
+                    .slice(0, 30); // Top 30 stocks
+            }, [filteredStocks]);
+
             const sortedTableData = useMemo(() => {
                 const data = [...filteredStocks];
                 if (!sortConfig.key) return data;
-
                 return data.sort((a, b) => {
                     let aV, bV;
                     if (sortConfig.key === 'hits') {
@@ -280,33 +277,17 @@
                         aV = a[sortConfig.key] ?? "";
                         bV = b[sortConfig.key] ?? "";
                     }
-                    
                     const direction = sortConfig.direction === 'asc' ? 1 : -1;
-
                     if (typeof aV === 'number' && typeof bV === 'number') {
-                        if (aV === bV) return b.date.localeCompare(a.date);
-                        return (aV - bV) * direction;
+                        return aV === bV ? b.date.localeCompare(a.date) : (aV - bV) * direction;
                     }
-                    
                     return String(aV).localeCompare(String(bV)) * direction;
                 });
             }, [filteredStocks, sortConfig, appearanceCounts]);
 
-            const handleChartClick = (data) => {
-                if (!data || !data.activeLabel || drillPath.length >= 2) return;
-                setDrillPath(prev => [...prev, data.activeLabel]);
-            };
-
             const resetToLevel = (level) => {
                 if (level === -1) setDrillPath([]);
                 else setDrillPath(prev => prev.slice(0, level + 1));
-            };
-
-            const toggleSort = (key) => {
-                setSortConfig(prev => ({
-                    key,
-                    direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc'
-                }));
             };
 
             return (
@@ -317,7 +298,7 @@
                         <div className="text-center md:text-left">
                             <h1 className="text-3xl font-black text-slate-800 tracking-tight">Nifty Alpha Dashboard</h1>
                             <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">
-                                {mappingFileName ? `Active Mapping: ${mappingFileName}` : 'Requires sector.xlsx to categorize'}
+                                {mappingFileName ? `Active Mapping: ${mappingFileName}` : 'Waiting for sector.xlsx'}
                             </p>
                         </div>
                         <div className="flex gap-3">
@@ -327,7 +308,7 @@
                                     Refresh
                                 </button>
                             )}
-                            <button onClick={handleSelectFolder} className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-2xl font-black shadow-lg shadow-blue-100 flex items-center gap-2 transition-all active:scale-95">
+                            <button onClick={handleSelectFolder} className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-2xl font-black shadow-lg shadow-blue-200 flex items-center gap-2 transition-all active:scale-95">
                                 <Icon name="folder-open" /> Connect Folder
                             </button>
                         </div>
@@ -341,91 +322,49 @@
 
                     {rawData.length > 0 && (
                         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 mb-8">
-                            <div className="xl:col-span-3 bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col gap-4">
-                                <div className="flex-1">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase mb-1.5 block tracking-widest">Min Week %</label>
-                                    <input type="number" value={minWeekDelivery} onChange={e => setMinWeekDelivery(Number(e.target.value))} className="w-full text-center text-xl font-black bg-slate-50 p-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-100 transition-all outline-none" />
+                            <div className="xl:col-span-3 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-center">
+                                <label className="text-[10px] font-black text-slate-500 uppercase mb-2 block tracking-widest text-center">Avg Delivery % Threshold</label>
+                                <div className="flex items-center gap-3">
+                                    <input type="number" value={minDeliveryPct} onChange={e => setMinDeliveryPct(Number(e.target.value))} className="w-full text-center text-4xl font-black text-blue-600 bg-slate-50 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-blue-100" />
                                 </div>
-                                <div className="flex-1">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase mb-1.5 block tracking-widest">Min Month %</label>
-                                    <input type="number" value={minMonthDelivery} onChange={e => setMinMonthDelivery(Number(e.target.value))} className="w-full text-center text-xl font-black bg-slate-50 p-2 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-100 transition-all outline-none" />
-                                </div>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase mt-3 text-center tracking-tighter">Applied to Weekly & Monthly Avg</p>
                             </div>
                             
                             <div className="xl:col-span-9 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-center">
                                 <div className="flex flex-wrap gap-1.5 mb-4">
-                                    {[
-                                        {id: 'all', label: 'All Data'},
-                                        {id: 'date', label: 'Date Picker'},
-                                        {id: 'month', label: 'Month View'},
-                                        {id: 'quarter', label: 'Quarter View'},
-                                        {id: 'year', label: 'Year View'},
-                                        {id: 'custom', label: 'Custom Range'}
-                                    ].map(m => (
-                                        <button 
-                                            key={m.id} 
-                                            onClick={() => setTimeFrameMode(m.id)}
-                                            className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${timeFrameMode === m.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
-                                        >
-                                            {m.label}
+                                    {['all', 'date', 'month', 'quarter', 'year', 'custom'].map(m => (
+                                        <button key={m} onClick={() => setTimeFrameMode(m)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${timeFrameMode === m ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>
+                                            {m === 'all' ? 'All Data' : m === 'date' ? 'Specific Date' : m + ' View'}
                                         </button>
                                     ))}
                                 </div>
 
                                 <div className="bg-slate-50 p-4 rounded-2xl flex flex-wrap items-end gap-4 min-h-[80px]">
                                     {timeFrameMode === 'date' && (
-                                        <div className="flex flex-col">
-                                            <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">Pick Date</label>
-                                            <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white" />
-                                        </div>
+                                        <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white" />
                                     )}
-
                                     {(timeFrameMode === 'month' || timeFrameMode === 'quarter' || timeFrameMode === 'year') && (
-                                        <div className="flex flex-col">
-                                            <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">Year</label>
-                                            <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white">
-                                                {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
-                                                {availableYears.length === 0 && <option value={new Date().getFullYear()}>{new Date().getFullYear()}</option>}
-                                            </select>
-                                        </div>
+                                        <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white">
+                                            {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                                        </select>
                                     )}
-
                                     {timeFrameMode === 'month' && (
-                                        <div className="flex flex-col">
-                                            <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">Month</label>
-                                            <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white min-w-[120px]">
-                                                {months.map((m, i) => <option key={m} value={i}>{m}</option>)}
-                                            </select>
-                                        </div>
+                                        <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white">
+                                            {months.map((m, i) => <option key={m} value={i}>{m}</option>)}
+                                        </select>
                                     )}
-
                                     {timeFrameMode === 'quarter' && (
-                                        <div className="flex flex-col">
-                                            <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">Quarter</label>
-                                            <select value={selectedQuarter} onChange={e => setSelectedQuarter(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white min-w-[140px]">
-                                                {quarters.map(q => <option key={q.val} value={q.val}>{q.label}</option>)}
-                                            </select>
-                                        </div>
+                                        <select value={selectedQuarter} onChange={e => setSelectedQuarter(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white">
+                                            {quarters.map(q => <option key={q.val} value={q.val}>{q.label}</option>)}
+                                        </select>
                                     )}
-
                                     {timeFrameMode === 'custom' && (
-                                        <>
-                                            <div className="flex flex-col">
-                                                <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">Start</label>
-                                                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white" />
-                                            </div>
-                                            <div className="flex flex-col">
-                                                <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 ml-1">End</label>
-                                                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white" />
-                                            </div>
-                                        </>
-                                    )}
-
-                                    {timeFrameMode === 'all' && (
-                                        <div className="h-full flex items-center">
-                                            <p className="text-xs font-bold text-slate-400 italic">Global search across all uploaded data...</p>
+                                        <div className="flex gap-2">
+                                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white" title="From" />
+                                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white" title="To" />
                                         </div>
                                     )}
+                                    {timeFrameMode === 'all' && <p className="text-xs font-bold text-slate-400 italic">Historical global search across all connected records...</p>}
                                 </div>
                             </div>
                         </div>
@@ -435,103 +374,79 @@
                         <div className="space-y-6">
                             <div className="flex flex-col md:flex-row gap-4 border-b border-slate-200 pb-2">
                                 <div className="flex gap-8">
-                                    <button onClick={() => setActiveTab('dashboard')} className={`pb-4 text-sm font-black transition-all relative ${activeTab === 'dashboard' ? 'text-blue-600' : 'text-slate-400'}`}>Analytics {activeTab === 'dashboard' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}</button>
-                                    <button onClick={() => setActiveTab('table')} className={`pb-4 text-sm font-black transition-all relative ${activeTab === 'table' ? 'text-blue-600' : 'text-slate-400'}`}>Full Table {activeTab === 'table' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}</button>
+                                    <button onClick={() => setActiveTab('dashboard')} className={`pb-4 text-sm font-black transition-all relative ${activeTab === 'dashboard' ? 'text-blue-600' : 'text-slate-400'}`}>Visual Analytics {activeTab === 'dashboard' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}</button>
+                                    <button onClick={() => setActiveTab('table')} className={`pb-4 text-sm font-black transition-all relative ${activeTab === 'table' ? 'text-blue-600' : 'text-slate-400'}`}>Data Table {activeTab === 'table' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}</button>
                                 </div>
                                 <div className="flex-1 relative">
                                      <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                                     <input type="text" placeholder="Search stock or code..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-white border border-slate-100 rounded-full text-xs font-bold outline-none focus:ring-2 focus:ring-blue-100 shadow-sm" />
+                                     <input type="text" placeholder="Quick stock search..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-white border border-slate-100 rounded-full text-xs font-bold outline-none focus:ring-2 focus:ring-blue-100 shadow-sm" />
                                 </div>
                             </div>
 
                             {activeTab === 'dashboard' ? (
-                                <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm min-h-[600px] chart-container">
-                                    <div className="flex items-center justify-between mb-10">
-                                        <div className="flex flex-wrap items-center gap-1 no-scrollbar">
-                                            <button 
-                                                onClick={() => resetToLevel(-1)} 
-                                                className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all ${drillPath.length === 0 ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
-                                            >
-                                                Sectors
-                                            </button>
-                                            {drillPath.map((p, i) => (
-                                                <React.Fragment key={i}>
-                                                    <ChevronRight />
-                                                    <button 
-                                                        onClick={() => resetToLevel(i)} 
-                                                        className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all breadcrumb-item ${i === drillPath.length - 1 ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}
-                                                    >
-                                                        {p}
-                                                    </button>
-                                                </React.Fragment>
-                                            ))}
+                                <div className="grid grid-cols-1 gap-8">
+                                    {/* Drill-down Hierarchy Chart */}
+                                    <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm min-h-[550px] chart-container">
+                                        <div className="flex items-center justify-between mb-8">
+                                            <div className="flex flex-wrap items-center gap-1">
+                                                <button onClick={() => resetToLevel(-1)} className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all ${drillPath.length === 0 ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>Sectors</button>
+                                                {drillPath.map((p, i) => (
+                                                    <React.Fragment key={i}>
+                                                        <ChevronRight />
+                                                        <button onClick={() => resetToLevel(i)} className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all breadcrumb-item ${i === drillPath.length - 1 ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-50 text-slate-400'}`}>{p}</button>
+                                                    </React.Fragment>
+                                                ))}
+                                            </div>
+                                            {drillPath.length > 0 && (
+                                                <button onClick={() => resetToLevel(drillPath.length - 2)} className="text-xs font-black text-slate-400 flex items-center gap-1 hover:text-blue-600 transition-colors"><ArrowLeftIcon /> Back</button>
+                                            )}
                                         </div>
-                                        {drillPath.length > 0 && (
-                                            <button 
-                                                onClick={() => resetToLevel(drillPath.length - 2)} 
-                                                className="text-xs font-black text-slate-400 flex items-center gap-1 hover:text-blue-600 transition-colors"
-                                            >
-                                                <ArrowLeftIcon /> Back
-                                            </button>
-                                        )}
+                                        <div className="h-[400px]">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={drillChartData} layout="vertical" onClick={data => data?.activeLabel && drillPath.length < 2 && setDrillPath([...drillPath, data.activeLabel])} margin={{ right: 120, left: 20 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={false} stroke="#f1f5f9" />
+                                                    <XAxis type="number" tick={{fontSize: 9, fontWeight: 800}} stroke="#cbd5e1" domain={[0, (max) => Math.ceil(max * 1.25)]} />
+                                                    <YAxis type="category" dataKey="name" width={160} tick={{fontSize: 10, fontWeight: 800}} interval={0} />
+                                                    <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '20px', border: 'none', fontWeight: 900}} />
+                                                    <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={25}>
+                                                        {drillChartData.map((entry, index) => <Cell key={`c-${index}`} fill={COLORS[index % COLORS.length]} className="cursor-pointer hover:opacity-80" />)}
+                                                        <LabelList dataKey="value" position="right" style={{fontSize: '11px', fontWeight: 900, fill: '#1e293b'}} offset={10} />
+                                                    </Bar>
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                        <div className="mt-4 text-center"><p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em]">Sector → Industry → Company Drill-down</p></div>
                                     </div>
 
-                                    <div className="h-[500px]">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <BarChart 
-                                                data={chartData} 
-                                                layout="vertical"
-                                                onClick={handleChartClick}
-                                                margin={{ top: 20, right: 100, left: 20, bottom: 20 }}
-                                            >
-                                                <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={false} stroke="#f1f5f9" />
-                                                <XAxis 
-                                                    type="number" 
-                                                    tick={{fontSize: 9, fontWeight: 800}} 
-                                                    stroke="#cbd5e1"
-                                                    domain={[0, (dataMax) => Math.ceil(dataMax * 1.2)]} // 20% overhead to fit labels
-                                                />
-                                                <YAxis 
-                                                    type="category" 
-                                                    dataKey="name" 
-                                                    width={160} 
-                                                    tick={{fontSize: 10, fontWeight: 800}} 
-                                                    interval={0}
-                                                />
-                                                <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '20px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 900}} />
-                                                <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={chartData.length > 10 ? 20 : 40}>
-                                                    {chartData.map((entry, index) => (
-                                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} className="cursor-pointer hover:opacity-80 transition-opacity" />
-                                                    ))}
-                                                    <LabelList dataKey="value" position="right" style={{fontSize: '11px', fontWeight: 900, fill: '#1e293b'}} />
-                                                </Bar>
-                                            </BarChart>
-                                        </ResponsiveContainer>
-                                    </div>
-                                    <div className="mt-6 text-center border-t border-slate-50 pt-4">
-                                        <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.4em] flex items-center justify-center gap-2">
-                                            Click bars to dive deeper
-                                        </p>
+                                    {/* Overall Stock Hit Frequency Chart */}
+                                    <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm min-h-[550px] chart-container">
+                                        <h3 className="text-xl font-black text-slate-800 mb-8 uppercase tracking-tight flex items-center gap-3">
+                                            <Icon name="bar-chart-3" className="text-blue-600" /> Top Stock Hit Frequency
+                                        </h3>
+                                        <div className="h-[600px]">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={topHitsData} layout="vertical" margin={{ right: 120, left: 20 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={false} stroke="#f1f5f9" />
+                                                    <XAxis type="number" tick={{fontSize: 9, fontWeight: 800}} stroke="#cbd5e1" domain={[0, (max) => Math.ceil(max * 1.25)]} />
+                                                    <YAxis type="category" dataKey="name" width={160} tick={{fontSize: 10, fontWeight: 800}} interval={0} />
+                                                    <Tooltip contentStyle={{borderRadius: '20px', border: 'none', fontWeight: 900}} />
+                                                    <Bar dataKey="value" fill="#3b82f6" radius={[0, 6, 6, 0]} barSize={16}>
+                                                        <LabelList dataKey="value" position="right" style={{fontSize: '11px', fontWeight: 900, fill: '#1e293b'}} offset={10} />
+                                                    </Bar>
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
                                     </div>
                                 </div>
                             ) : (
                                 <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
                                     <div className="overflow-x-auto table-scroll">
                                         <table className="w-full text-left border-collapse">
-                                            <thead className="bg-slate-50 border-b border-slate-100 text-[10px] font-black uppercase text-slate-400 tracking-widest">
+                                            <thead className="bg-slate-50/80 border-b border-slate-100 text-[10px] font-black uppercase text-slate-400 tracking-widest">
                                                 <tr>
-                                                    {[
-                                                        {key: 'date', label: 'Date'},
-                                                        {key: 'stockName', label: 'Stock'},
-                                                        {key: 'sector', label: 'Classification'},
-                                                        {key: 'hits', label: 'Hits (Freq)'},
-                                                        {key: 'deliveryEod', label: 'Delivery EOD'}
-                                                    ].map(h => (
-                                                        <th key={h.key} className="p-6 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => toggleSort(h.key)}>
-                                                            <div className="flex items-center">
-                                                                {h.label}
-                                                                {sortConfig.key === h.key && <SortIcon direction={sortConfig.direction} />}
-                                                            </div>
+                                                    {[{key:'date', label:'Date'}, {key:'stockName', label:'Stock'}, {key:'sector', label:'Classification'}, {key:'hits', label:'Hits'}, {key:'deliveryEod', label:'Del %'}].map(h => (
+                                                        <th key={h.key} className="p-6 cursor-pointer hover:bg-slate-100" onClick={() => setSortConfig(prev => ({key:h.key, direction: prev.key === h.key && prev.direction === 'desc' ? 'asc' : 'desc'}))}>
+                                                            <div className="flex items-center">{h.label} {sortConfig.key === h.key && <SortIcon direction={sortConfig.direction} />}</div>
                                                         </th>
                                                     ))}
                                                 </tr>
@@ -542,21 +457,18 @@
                                                         <td className="p-6 text-[10px] font-black text-slate-400">{s.date}</td>
                                                         <td className="p-6">
                                                             <div className="font-black text-slate-800 text-sm tracking-tight">{s.stockName}</div>
-                                                            <div className="text-[10px] font-mono font-black text-blue-600 uppercase tracking-tighter">{s.nseCode}</div>
+                                                            <div className="text-[10px] font-mono font-black text-blue-600 uppercase">{s.nseCode}</div>
                                                         </td>
                                                         <td className="p-6">
                                                             <div className="text-xs font-black text-slate-700">{s.sector}</div>
-                                                            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{s.industry}</div>
+                                                            <div className="text-[10px] font-bold text-slate-400 uppercase">{s.industry}</div>
                                                         </td>
                                                         <td className="p-6 text-center">
-                                                            <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-black border border-blue-100 shadow-sm">{appearanceCounts[s.nseCode]}</span>
+                                                            <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-black border border-blue-100">{appearanceCounts[s.nseCode]}</span>
                                                         </td>
                                                         <td className="p-6 font-black text-emerald-600 text-sm">{s.deliveryEod}%</td>
                                                     </tr>
                                                 ))}
-                                                {sortedTableData.length === 0 && (
-                                                    <tr><td colSpan="5" className="p-24 text-center font-black text-slate-300 tracking-[0.2em] uppercase text-sm">No results found for these filters</td></tr>
-                                                )}
                                             </tbody>
                                         </table>
                                     </div>
@@ -567,15 +479,13 @@
 
                     {rawData.length === 0 && (
                         <div className="h-[75vh] flex flex-col items-center justify-center text-center px-4">
-                            <div className="bg-blue-600 text-white p-10 rounded-[2.5rem] shadow-2xl mb-10 shadow-blue-500/40 transform -rotate-2">
+                            <div className="bg-blue-600 text-white p-10 rounded-[2.5rem] shadow-2xl mb-10 shadow-blue-500/40">
                                 <Icon name="folder-open" size={64} />
                             </div>
-                            <h2 className="text-5xl font-black text-slate-800 mb-4 tracking-tight">Alpha Insights</h2>
-                            <p className="text-slate-400 font-bold max-w-sm mb-12 text-lg leading-relaxed">
-                                Connect your folder with daily data and <span className="text-blue-600 underline">sector.xlsx</span> mapping to begin analysis.
-                            </p>
+                            <h2 className="text-5xl font-black text-slate-800 mb-3 tracking-tight">Alpha Analytics</h2>
+                            <p className="text-slate-400 font-bold max-w-sm mb-12 text-lg">Connect your folder with daily Nifty exports and your <span className="text-blue-600 underline">sector.xlsx</span> mapping.</p>
                             <button onClick={handleSelectFolder} className="bg-slate-900 hover:bg-slate-800 text-white px-12 py-5 rounded-[2rem] font-black flex items-center gap-3 shadow-xl transition-all active:scale-95 text-lg">
-                                {isProcessing ? <Icon name="loader-2" className="animate-spin" /> : <Icon name="play" />} {isProcessing ? 'Crunching Data...' : 'Connect Your Folder'}
+                                {isProcessing ? <Icon name="loader-2" className="animate-spin" /> : <Icon name="play" />} {isProcessing ? 'Crunching...' : 'Select Folder'}
                             </button>
                         </div>
                     )}
