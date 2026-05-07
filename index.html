@@ -12,7 +12,6 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; overflow-x: hidden; }
@@ -31,7 +30,7 @@
         const { useState, useMemo, useEffect, useCallback, useRef } = React;
         const { 
             BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-            Cell, LabelList, ScatterChart, Scatter, ZAxis, Legend, PieChart, Pie
+            Cell, LabelList, PieChart, Pie, Legend
         } = window.Recharts;
 
         // Permanent Static Icons (Zero-crash navigation)
@@ -40,22 +39,7 @@
             Back: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="mr-1.5"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>,
             Refresh: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mr-1.5"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>,
             Folder: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mr-1.5"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/></svg>,
-            Insights: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mr-1.5"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/><path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/></svg>,
             Sort: ({ d }) => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="ml-1 text-blue-600">{d === 'asc' ? <path d="m5 12 7-7 7 7M12 19V5"/> : <path d="m19 12-7 7-7-7M12 5v14"/>}</svg>
-        };
-
-        const Icon = ({ name, size = 18, className = "" }) => {
-            const iconRef = useRef(null);
-            useEffect(() => {
-                if (window.lucide && iconRef.current) {
-                    window.lucide.createIcons({
-                        attrs: { class: className, width: size, height: size },
-                        nameAttr: 'data-lucide',
-                        icons: window.lucide.icons
-                    });
-                }
-            }, [name, size, className]);
-            return <i ref={iconRef} data-lucide={name} className={className} style={{ width: size, height: size, display: 'inline-block' }}></i>;
         };
 
         const App = () => {
@@ -80,19 +64,18 @@
             const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#64748b'];
 
             const mapRowToStock = (row, date) => {
-                const nseCode = (row['NSE code'] || row['Symbol'])?.toString().trim();
+                const nseCode = (row['NSE code'] || row['Symbol'] || row['NSE Code'] || row['Ticker'])?.toString().trim();
                 if (!nseCode) return null;
                 return {
                     date, nseCode,
-                    stockName: row['Stock Name'] || 'Unknown',
+                    stockName: row['Stock Name'] || row['Name'] || 'Unknown',
                     deliveryEod: parseFloat(row['Delivery% volume end of day']) || 0,
                     deliveryAvgWeek: parseFloat(row['Delivery% volume Avg Week']) || 0,
                     deliveryAvgMonth: parseFloat(row['Delivery% volume Avg Month']) || 0,
                     deliveryAvg6Month: parseFloat(row['Delivery% volume Avg 6Month']) || 0,
-                    price: parseFloat(row['Current Price']) || 0,
-                    sma200: parseFloat(row['Day SMA200']) || 0,
-                    priceChange: parseFloat(row['Day change %']) || 0,
-                    marketCap: parseFloat(row['Market Capitalization']) || 0
+                    price: parseFloat(row['Current Price'] || row['Price']) || 0,
+                    sma200: parseFloat(row['Day SMA200'] || row['SMA 200']) || 0,
+                    marketCap: parseFloat(row['Market Capitalization'] || row['Market Cap']) || 0
                 };
             };
 
@@ -100,31 +83,39 @@
                 setIsProcessing(true);
                 let newRaw = [];
                 let mapping = {};
-                let foundMappingFile = '';
-                
-                for (const file of filesList) {
-                    const name = file.name.toLowerCase();
-                    if (!(name.endsWith('.xlsx') || name.endsWith('.csv'))) continue;
-                    const data = await file.arrayBuffer();
-                    const wb = XLSX.read(data, { type: 'array' });
-                    const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-                    
-                    if (name === 'sector.xlsx') {
-                        foundMappingFile = file.name;
-                        json.forEach(r => {
-                            const c = r['NSE code'] || r['Symbol'];
-                            if (c) mapping[c.toString().trim()] = { sector: r['Sector'] || 'Uncategorized', industry: r['Industry'] || 'Uncategorized' };
-                        });
-                    } else {
-                        const m = name.match(/(\d{4})[./\-_](\d{1,2})[./\-_](\d{1,2})/);
-                        const date = m ? `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}` : new Date(file.lastModified).toISOString().split('T')[0];
-                        newRaw.push(...json.map(r => mapRowToStock(r, date)).filter(Boolean));
+                let foundMappingName = '';
+
+                try {
+                    for (const file of filesList) {
+                        const name = file.name.toLowerCase();
+                        if (!(name.endsWith('.xlsx') || name.endsWith('.xls') || name.endsWith('.csv'))) continue;
+                        const data = await file.arrayBuffer();
+                        const wb = XLSX.read(data, { type: 'array' });
+                        const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+                        
+                        if (name === 'sector.xlsx') {
+                            json.forEach(r => {
+                                const c = r['NSE code'] || r['Symbol'] || r['NSE Code'] || r['Ticker'];
+                                if (c) mapping[c.toString().trim()] = { 
+                                    sector: r['Sector'] || r['sector_name'] || 'Uncategorized', 
+                                    industry: r['Industry'] || r['industry_name'] || 'Uncategorized' 
+                                };
+                            });
+                            foundMappingName = file.name;
+                        } else {
+                            const m = name.match(/(\d{4})[./\-_](\d{1,2})[./\-_](\d{1,2})/);
+                            const date = m ? `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}` : new Date(file.lastModified).toISOString().split('T')[0];
+                            newRaw.push(...json.map(r => mapRowToStock(r, date)).filter(Boolean));
+                        }
                     }
+                    setSectorIndustryMap(mapping);
+                    setMappingFileName(foundMappingName);
+                    setRawData(newRaw);
+                } catch (err) {
+                    console.error("Processing error:", err);
+                } finally {
+                    setIsProcessing(false);
                 }
-                setSectorIndustryMap(mapping);
-                setMappingFileName(foundMappingFile);
-                setRawData(newRaw);
-                setIsProcessing(false);
             }, []);
 
             const scanDir = async (h) => {
@@ -135,9 +126,11 @@
 
             const handleSelectFolder = async () => {
                 if (window.showDirectoryPicker) {
-                    const h = await window.showDirectoryPicker();
-                    setDirectoryHandle(h);
-                    await scanDir(h);
+                    try {
+                        const h = await window.showDirectoryPicker();
+                        setDirectoryHandle(h);
+                        await scanDir(h);
+                    } catch (e) { console.log("Cancelled"); }
                 }
             };
 
@@ -160,27 +153,45 @@
 
                     const search = searchQuery.toLowerCase();
                     return s.stockName.toLowerCase().includes(search) || s.nseCode.toLowerCase().includes(search);
-                }).map(s => ({ ...s, sector: sectorIndustryMap[s.nseCode]?.sector || 'Not in Mapping', industry: sectorIndustryMap[s.nseCode]?.industry || 'Not in Mapping' }));
-            }, [rawData, sectorIndustryMap, minDeliveryPct, timeFrameMode, selectedDate, startDate, endDate, selectedMonth, selectedQuarter, selectedYear, searchQuery]);
-
-            const tableScope = useMemo(() => {
-                if (activeTab !== 'drilldown' || drillPath.length === 0) return filteredData;
-                return filteredData.filter(s => s.sector === drillPath[0] && (drillPath.length < 2 || s.industry === drillPath[1]));
-            }, [filteredData, drillPath, activeTab]);
+                }).map(s => {
+                    const map = sectorIndustryMap[s.nseCode];
+                    return { 
+                        ...s, 
+                        sector: map ? map.sector : (mappingFileName ? 'Not in Mapping' : 'Pending Mapping'),
+                        industry: map ? map.industry : (mappingFileName ? 'Not in Mapping' : 'Pending Mapping')
+                    };
+                });
+            }, [rawData, sectorIndustryMap, mappingFileName, minDeliveryPct, timeFrameMode, selectedDate, startDate, endDate, selectedMonth, selectedQuarter, selectedYear, searchQuery]);
 
             const appearanceCounts = useMemo(() => {
                 const c = {}; filteredData.forEach(s => c[s.nseCode] = (c[s.nseCode] || 0) + 1); return c;
             }, [filteredData]);
 
-            // Charts Logic
+            // Hierarchy Drill-down Logic
             const drillChartData = useMemo(() => {
                 const counts = {};
-                tableScope.forEach(s => {
+                const currentScope = filteredData.filter(s => {
+                    if (drillPath.length >= 1 && s.sector !== drillPath[0]) return false;
+                    if (drillPath.length >= 2 && s.industry !== drillPath[1]) return false;
+                    return true;
+                });
+
+                currentScope.forEach(s => {
                     const label = drillPath.length === 0 ? s.sector : drillPath.length === 1 ? s.industry : s.nseCode;
                     counts[label] = (counts[label] || 0) + 1;
                 });
                 return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
-            }, [tableScope, drillPath]);
+            }, [filteredData, drillPath]);
+
+            // Top Stocks Count (Highest to Smallest)
+            const globalFreqData = useMemo(() => {
+                const counts = {};
+                filteredData.forEach(s => counts[s.nseCode] = (counts[s.nseCode] || 0) + 1);
+                return Object.entries(counts)
+                    .map(([name, value]) => ({ name, value }))
+                    .sort((a,b) => b.value - a.value)
+                    .slice(0, 30);
+            }, [filteredData]);
 
             const breadthInsights = useMemo(() => {
                 const groups = {};
@@ -189,19 +200,25 @@
                     groups[s.sector].total++;
                     if (s.price > s.sma200) groups[s.sector].healthy++;
                 });
-                return Object.values(groups).map(g => ({ name: g.name, score: Math.round((g.healthy/g.total)*100), count: g.total }))
+                return Object.values(groups).map(g => ({ name: g.name, score: Math.round((g.healthy/g.total)*100) }))
                     .sort((a,b) => b.score - a.score);
             }, [filteredData]);
 
             const sortedTable = useMemo(() => {
-                const data = [...tableScope];
+                const data = [...filteredData];
                 if (!sortConfig.key) return data;
                 return data.sort((a,b) => {
                     const aV = sortConfig.key === 'hits' ? appearanceCounts[a.nseCode] : a[sortConfig.key];
                     const bV = sortConfig.key === 'hits' ? appearanceCounts[b.nseCode] : b[sortConfig.key];
-                    return (sortConfig.direction === 'asc' ? 1 : -1) * (aV > bV ? 1 : -1);
+                    const factor = sortConfig.direction === 'asc' ? 1 : -1;
+                    return aV > bV ? factor : -factor;
                 });
-            }, [tableScope, sortConfig, appearanceCounts]);
+            }, [filteredData, sortConfig, appearanceCounts]);
+
+            const resetToLevel = (level) => {
+                if (level === -1) setDrillPath([]);
+                else setDrillPath(prev => prev.slice(0, level + 1));
+            };
 
             return (
                 <div className="p-4 md:p-8 max-w-[1600px] mx-auto">
@@ -209,12 +226,12 @@
                         <div>
                             <h1 className="text-4xl font-black text-slate-800 tracking-tight">Alpha Insights Unified</h1>
                             <p className="text-slate-400 text-xs font-bold uppercase tracking-[0.2em] mt-1 flex items-center">
-                                {rawData.length > 0 ? <span className="text-emerald-500 mr-2">● Live</span> : <span className="text-slate-300 mr-2">○ Offline</span>}
-                                {mappingFileName || 'Awaiting sector.xlsx mapping'}
+                                {rawData.length > 0 ? <span className="text-emerald-500 mr-2">● Live Data</span> : <span className="text-slate-300 mr-2">○ No Data</span>}
+                                {mappingFileName || 'sector.xlsx required'}
                             </p>
                         </div>
                         <div className="flex gap-3">
-                            {directoryHandle && <button onClick={() => scanDir(directoryHandle)} className="bg-white border border-slate-200 text-slate-600 px-6 py-3 rounded-2xl font-bold flex items-center hover:bg-slate-50 transition-all"><Icons.Refresh /> Refresh</button>}
+                            {directoryHandle && <button onClick={() => scanDir(directoryHandle)} className="bg-white border border-slate-200 text-slate-600 px-6 py-3 rounded-2xl font-bold flex items-center hover:bg-slate-50"><Icons.Refresh /> Refresh</button>}
                             <button onClick={handleSelectFolder} className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-2xl font-black shadow-lg shadow-blue-200 flex items-center transition-all active:scale-95"><Icons.Folder /> Connect Data Folder</button>
                         </div>
                     </header>
@@ -222,14 +239,14 @@
                     {rawData.length > 0 && (
                         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 mb-10">
                             <div className="xl:col-span-3 card p-8 flex flex-col justify-center text-center">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Delivery Threshold %</label>
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Min Avg Delivery %</label>
                                 <input type="number" value={minDeliveryPct} onChange={e => setMinDeliveryPct(Number(e.target.value))} className="text-5xl font-black text-blue-600 outline-none w-full text-center" />
-                                <p className="text-[9px] font-bold text-slate-300 mt-2 uppercase italic">Syncs Weekly & Monthly</p>
+                                <p className="text-[9px] font-bold text-slate-300 mt-2 uppercase italic">Filters both Week & Month</p>
                             </div>
                             <div className="xl:col-span-9 card p-8">
                                 <div className="flex flex-wrap gap-2 mb-6">
                                     {['all', 'date', 'month', 'quarter', 'year', 'custom'].map(m => (
-                                        <button key={m} onClick={() => setTimeFrameMode(m)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${timeFrameMode === m ? 'bg-slate-800 text-white shadow-lg' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>{m}</button>
+                                        <button key={m} onClick={() => setTimeFrameMode(m)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${timeFrameMode === m ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>{m}</button>
                                     ))}
                                 </div>
                                 <div className="flex flex-wrap items-end gap-4 min-h-[60px]">
@@ -242,7 +259,7 @@
                                     {timeFrameMode === 'month' && <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100">{["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m, i) => <option key={m} value={i}>{m}</option>)}</select>}
                                     {timeFrameMode === 'quarter' && <select value={selectedQuarter} onChange={e => setSelectedQuarter(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100"><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></select>}
                                     {timeFrameMode === 'custom' && <div className="flex gap-2"><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border rounded-xl" /><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded-xl" /></div>}
-                                    {timeFrameMode === 'all' && <p className="text-sm font-bold text-slate-300 italic">Exploring {rawData.length} total history records</p>}
+                                    {timeFrameMode === 'all' && <p className="text-sm font-bold text-slate-300 italic">Analyzing total history</p>}
                                 </div>
                             </div>
                         </div>
@@ -251,38 +268,57 @@
                     {rawData.length > 0 && (
                         <div className="space-y-8">
                             <div className="flex gap-8 border-b border-slate-200">
-                                {['drilldown', 'table', 'insights'].map(t => (
+                                {['drilldown', 'insights', 'table'].map(t => (
                                     <button key={t} onClick={() => setActiveTab(t)} className={`pb-4 text-sm font-black uppercase tracking-widest transition-all relative ${activeTab === t ? 'text-blue-600' : 'text-slate-400'}`}>
-                                        {t.replace('drilldown', 'Visual Drill-down').replace('insights', 'Advanced Insights')}
+                                        {t === 'drilldown' ? 'Visual Dashboard' : t === 'insights' ? 'Sector Insights' : 'Data Table'}
                                         {activeTab === t && <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600 rounded-full" />}
                                     </button>
                                 ))}
                             </div>
 
                             {activeTab === 'drilldown' && (
-                                <div className="card p-10 min-h-[600px]">
-                                    <div className="flex items-center justify-between mb-10">
-                                        <div className="flex flex-wrap items-center gap-1">
-                                            <button onClick={() => setDrillPath([])} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${drillPath.length === 0 ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-50 text-slate-400'}`}>Sectors</button>
-                                            {drillPath.map((p, i) => (
-                                                <React.Fragment key={i}><Icons.ChevronRight /><button onClick={() => setDrillPath(drillPath.slice(0, i+1))} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${i === drillPath.length-1 ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-50 text-slate-400'}`}>{p}</button></React.Fragment>
-                                            ))}
+                                <div className="space-y-8">
+                                    <div className="card p-10 min-h-[550px]">
+                                        <div className="flex items-center justify-between mb-10">
+                                            <div className="flex flex-wrap items-center gap-1">
+                                                <button onClick={() => setDrillPath([])} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${drillPath.length === 0 ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-50 text-slate-400'}`}>Sectors</button>
+                                                {drillPath.map((p, i) => (
+                                                    <React.Fragment key={i}><Icons.ChevronRight /><button onClick={() => setDrillPath(drillPath.slice(0, i+1))} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${i === drillPath.length-1 ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-50 text-slate-400'}`}>{p}</button></React.Fragment>
+                                                ))}
+                                            </div>
+                                            {drillPath.length > 0 && <button onClick={() => setDrillPath(drillPath.slice(0, -1))} className="text-xs font-black text-slate-400 flex items-center hover:text-blue-600"><Icons.Back /> Back</button>}
                                         </div>
-                                        {drillPath.length > 0 && <button onClick={() => setDrillPath(drillPath.slice(0, -1))} className="text-xs font-black text-slate-400 flex items-center hover:text-blue-600"><Icons.Back /> Back</button>}
+                                        <div className="h-[450px] chart-container">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={drillChartData} layout="vertical" margin={{ right: 100, left: 20 }} onClick={d => d?.activeLabel && drillPath.length < 2 && setDrillPath([...drillPath, d.activeLabel])}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={false} stroke="#f1f5f9" />
+                                                    <XAxis type="number" stroke="#cbd5e1" domain={[0, (max) => Math.ceil(max * 1.3)]} />
+                                                    <YAxis type="category" dataKey="name" width={160} interval={0} stroke="#cbd5e1" />
+                                                    <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '20px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 900}} />
+                                                    <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={25}>
+                                                        {drillChartData.map((e, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} className="cursor-pointer hover:opacity-80" />)}
+                                                        <LabelList dataKey="value" position="right" style={{fontSize: '11px', fontWeight: 900, fill: '#1e293b'}} offset={12} />
+                                                    </Bar>
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
                                     </div>
-                                    <div className="h-[500px]">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <BarChart data={drillChartData} layout="vertical" margin={{ right: 100, left: 20 }} onClick={d => d?.activeLabel && drillPath.length < 2 && setDrillPath([...drillPath, d.activeLabel])}>
-                                                <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={false} stroke="#f1f5f9" />
-                                                <XAxis type="number" stroke="#cbd5e1" domain={[0, (max) => Math.ceil(max * 1.25)]} />
-                                                <YAxis type="category" dataKey="name" width={160} interval={0} stroke="#cbd5e1" />
-                                                <Tooltip contentStyle={{borderRadius: '20px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 900}} cursor={{fill: '#f8fafc'}} />
-                                                <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={25}>
-                                                    {drillChartData.map((e, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} className="cursor-pointer hover:opacity-80" />)}
-                                                    <LabelList dataKey="value" position="right" style={{fontSize: '11px', fontWeight: 900, fill: '#1e293b'}} offset={12} />
-                                                </Bar>
-                                            </BarChart>
-                                        </ResponsiveContainer>
+
+                                    <div className="card p-10 min-h-[550px]">
+                                        <h3 className="text-xl font-black text-slate-800 mb-10 flex items-center gap-2">Top Stock Occurrences (NSE Codes)</h3>
+                                        <div className="h-[600px] chart-container">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={globalFreqData} layout="vertical" margin={{ right: 100, left: 20 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={false} stroke="#f1f5f9" />
+                                                    <XAxis type="number" stroke="#cbd5e1" domain={[0, (max) => Math.ceil(max * 1.3)]} />
+                                                    <YAxis type="category" dataKey="name" width={100} interval={0} stroke="#cbd5e1" />
+                                                    <Tooltip cursor={{fill: '#f8fafc'}} />
+                                                    <Bar dataKey="value" fill="#3b82f6" radius={[0, 6, 6, 0]} barSize={15}>
+                                                        <LabelList dataKey="value" position="right" style={{fontSize: '10px', fontWeight: 900}} offset={12} />
+                                                    </Bar>
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -290,8 +326,8 @@
                             {activeTab === 'insights' && (
                                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                                     <div className="lg:col-span-8 card p-10 min-h-[500px]">
-                                        <h3 className="text-xl font-black text-slate-800 mb-8 flex items-center gap-2"><Icons.Insights /> Market Breadth: % Above SMA 200</h3>
-                                        <div className="h-[400px]">
+                                        <h3 className="text-xl font-black text-slate-800 mb-8 flex items-center gap-2">Market Breadth: % Above SMA 200</h3>
+                                        <div className="h-[400px] chart-container">
                                             <ResponsiveContainer width="100%" height="100%">
                                                 <BarChart data={breadthInsights} layout="vertical" margin={{ right: 80, left: 20 }}>
                                                     <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={false} stroke="#f1f5f9" />
@@ -307,11 +343,15 @@
                                         </div>
                                     </div>
                                     <div className="lg:col-span-4 card p-10 flex flex-col items-center">
-                                        <h3 className="text-xl font-black text-slate-800 self-start mb-10">Cap Momentum</h3>
+                                        <h3 className="text-xl font-black text-slate-800 self-start mb-10">Market Cap Mix</h3>
                                         <div className="h-[300px] w-full">
                                             <ResponsiveContainer width="100%" height="100%">
                                                 <PieChart>
-                                                    <Pie data={[{n:'Large',v:filteredData.filter(s=>s.marketCap>20000).length}, {n:'Mid',v:filteredData.filter(s=>s.marketCap>5000&&s.marketCap<=20000).length}, {n:'Small',v:filteredData.filter(s=>s.marketCap<=5000).length}]} dataKey="v" nameKey="n" innerRadius={70} outerRadius={110} paddingAngle={10}>
+                                                    <Pie data={[
+                                                        {n:'Large Cap',v:filteredData.filter(s=>s.marketCap>20000).length},
+                                                        {n:'Mid Cap',v:filteredData.filter(s=>s.marketCap>5000&&s.marketCap<=20000).length},
+                                                        {n:'Small Cap',v:filteredData.filter(s=>s.marketCap<=5000).length}
+                                                    ]} dataKey="v" nameKey="n" innerRadius={70} outerRadius={110} paddingAngle={10}>
                                                         {COLORS.map((c, i) => <Cell key={i} fill={c} />)}
                                                     </Pie>
                                                     <Tooltip />
@@ -325,6 +365,15 @@
 
                             {activeTab === 'table' && (
                                 <div className="card overflow-hidden">
+                                    <div className="p-4 border-b border-slate-50">
+                                        <input 
+                                            type="text" 
+                                            placeholder="Quick Search..." 
+                                            value={searchQuery} 
+                                            onChange={e => setSearchQuery(e.target.value)} 
+                                            className="w-full max-w-md p-2 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold outline-none"
+                                        />
+                                    </div>
                                     <div className="overflow-x-auto table-scroll">
                                         <table className="w-full text-left border-collapse">
                                             <thead className="bg-slate-50 border-b border-slate-100 text-[10px] font-black uppercase text-slate-400 tracking-widest">
@@ -338,7 +387,7 @@
                                             </thead>
                                             <tbody className="divide-y divide-slate-100">
                                                 {sortedTable.map((s, i) => (
-                                                    <tr key={i} className="hover:bg-blue-50/40 transition-colors group text-sm">
+                                                    <tr key={i} className="hover:bg-blue-50/40 transition-colors text-sm">
                                                         <td className="p-6 text-[10px] font-black text-slate-400">{s.date}</td>
                                                         <td className="p-6 font-black text-slate-800">{s.nseCode}</td>
                                                         <td className="p-6"><div className="text-xs font-black text-slate-700">{s.sector}</div><div className="text-[10px] font-bold text-slate-300 uppercase">{s.industry}</div></td>
@@ -355,14 +404,14 @@
                     )}
 
                     {rawData.length === 0 && (
-                        <div className="h-[75vh] flex flex-col items-center justify-center text-center">
-                            <div className="bg-blue-600 text-white p-10 rounded-[2.5rem] shadow-2xl mb-10 shadow-blue-500/40 transform -rotate-2">
+                        <div className="h-[75vh] flex flex-col items-center justify-center text-center px-6">
+                            <div className="bg-blue-600 text-white p-10 rounded-[2.5rem] shadow-2xl mb-10 transform -rotate-2">
                                 <Icons.Folder />
                             </div>
-                            <h2 className="text-5xl font-black text-slate-800 mb-4 tracking-tight leading-tight">Professional Stock <br/> Momentum Analytics</h2>
-                            <p className="text-slate-400 font-bold max-w-md mb-12 text-lg leading-relaxed">Select your local folder containing your daily nifty tracking files and <span className="text-blue-600 underline underline-offset-4 decoration-2">sector.xlsx</span>.</p>
+                            <h2 className="text-5xl font-black text-slate-800 mb-4 tracking-tight">Analytics Awaits</h2>
+                            <p className="text-slate-400 font-bold max-w-md mb-12 text-lg">Connect folder with daily nifty tracking files and your <span className="text-blue-600 underline underline-offset-4">sector.xlsx</span> mapping.</p>
                             <button onClick={handleSelectFolder} className="bg-slate-900 hover:bg-slate-800 text-white px-12 py-5 rounded-[2rem] font-black flex items-center gap-3 shadow-xl transition-all active:scale-95 text-xl">
-                                {isProcessing ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/> : <Icons.Folder />} {isProcessing ? 'Processing Data...' : 'Connect Folder'}
+                                {isProcessing ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/> : <Icons.Folder />} {isProcessing ? 'Processing...' : 'Connect Folder'}
                             </button>
                         </div>
                     )}
