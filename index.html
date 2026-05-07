@@ -67,10 +67,7 @@
             const [directoryHandle, setDirectoryHandle] = useState(null);
             const [errorMessage, setErrorMessage] = useState('');
             
-            // Filter states
             const [minDeliveryPct, setMinDeliveryPct] = useState(60); 
-            
-            // Timeframe states
             const [timeFrameMode, setTimeFrameMode] = useState('all'); 
             const [selectedDate, setSelectedDate] = useState('');
             const [startDate, setStartDate] = useState('');
@@ -153,16 +150,11 @@
                             setMappingFileName(file.name);
                             mappingFound = true;
                         } else {
-                            // Flexible Regex to handle various delimiters and padding in filenames
                             const dateMatch = file.name.match(/(\d{4})[./\-_](\d{1,2})[./\-_](\d{1,2})/);
                             let fileDate;
                             if (dateMatch) {
-                                const y = dateMatch[1];
-                                const m = dateMatch[2].padStart(2, '0');
-                                const d = dateMatch[3].padStart(2, '0');
-                                fileDate = `${y}-${m}-${d}`;
+                                fileDate = `${dateMatch[1]}-${dateMatch[2].padStart(2, '0')}-${dateMatch[3].padStart(2, '0')}`;
                             } else {
-                                // Last resort: use system date if filename has no date
                                 fileDate = new Date(file.lastModified).toISOString().split('T')[0];
                             }
                             const parsedRows = jsonData.map(row => mapRowToStock(row, fileDate)).filter(Boolean);
@@ -181,19 +173,34 @@
                 }
             }, []);
 
+            // New: Separated logic to scan a handle without opening the picker
+            const scanDirectory = useCallback(async (handle) => {
+                try {
+                    const files = [];
+                    for await (const entry of handle.values()) {
+                        if (entry.kind === 'file') files.push(await entry.getFile());
+                    }
+                    await processFiles(files);
+                } catch (e) {
+                    setErrorMessage('Permission denied or folder inaccessible.');
+                }
+            }, [processFiles]);
+
             const handleSelectFolder = async () => {
                 if (window.showDirectoryPicker) {
                     try {
                         const handle = await window.showDirectoryPicker();
-                        const files = [];
-                        for await (const entry of handle.values()) {
-                            if (entry.kind === 'file') files.push(await entry.getFile());
-                        }
                         setDirectoryHandle(handle);
-                        await processFiles(files);
+                        await scanDirectory(handle);
                     } catch (e) {}
                 } else {
                     fallbackInputRef.current?.click();
+                }
+            };
+
+            const handleRefresh = async () => {
+                if (directoryHandle) {
+                    await scanDirectory(directoryHandle);
                 }
             };
 
@@ -252,7 +259,6 @@
                 const counts = {};
                 const depth = drillPath.length;
                 filteredStocks.forEach(s => {
-                    // Change: Use NSE Code instead of Stock Name at company level (depth 2)
                     let label = depth === 0 ? s.sector : depth === 1 ? s.industry : s.nseCode;
                     if (label) counts[label] = (counts[label] || 0) + 1;
                 });
@@ -262,7 +268,6 @@
             const topHitsData = useMemo(() => {
                 const counts = {};
                 filteredStocks.forEach(s => {
-                    // Change: Use NSE Code for the frequency chart
                     counts[s.nseCode] = (counts[s.nseCode] || 0) + 1;
                 });
                 return Object.entries(counts)
@@ -304,12 +309,12 @@
                         <div className="text-center md:text-left">
                             <h1 className="text-3xl font-black text-slate-800 tracking-tight">Nifty Alpha Dashboard</h1>
                             <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-1">
-                                {mappingFileName ? `Active Mapping: ${mappingFileName}` : 'Waiting for sector.xlsx'}
+                                {mappingFileName ? `Active Mapping: ${mappingFileName}` : 'Requires sector.xlsx'}
                             </p>
                         </div>
                         <div className="flex gap-3">
                             {directoryHandle && (
-                                <button onClick={() => handleSelectFolder()} className="bg-white border border-slate-200 text-slate-600 px-5 py-3 rounded-2xl font-bold flex items-center gap-2 transition-all hover:bg-slate-50">
+                                <button onClick={handleRefresh} className="bg-white border border-slate-200 text-slate-600 px-5 py-3 rounded-2xl font-bold flex items-center gap-2 transition-all hover:bg-slate-50">
                                     <Icon name="refresh-cw" size={16} className={isProcessing ? 'animate-spin' : ''} />
                                     Refresh
                                 </button>
@@ -329,18 +334,18 @@
                     {rawData.length > 0 && (
                         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 mb-8">
                             <div className="xl:col-span-3 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-center">
-                                <label className="text-[10px] font-black text-slate-500 uppercase mb-2 block tracking-widest text-center">Avg Delivery % Threshold</label>
+                                <label className="text-[10px] font-black text-slate-500 uppercase mb-2 block tracking-widest text-center">Min Delivery Avg %</label>
                                 <div className="flex items-center gap-3">
                                     <input type="number" value={minDeliveryPct} onChange={e => setMinDeliveryPct(Number(e.target.value))} className="w-full text-center text-4xl font-black text-blue-600 bg-slate-50 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-blue-100" />
                                 </div>
-                                <p className="text-[9px] font-bold text-slate-400 uppercase mt-3 text-center tracking-tighter">Applied to Week & Month Avg</p>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase mt-3 text-center tracking-tighter italic">Applies to Week & Month</p>
                             </div>
                             
                             <div className="xl:col-span-9 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-center">
                                 <div className="flex flex-wrap gap-1.5 mb-4">
                                     {['all', 'date', 'month', 'quarter', 'year', 'custom'].map(m => (
                                         <button key={m} onClick={() => setTimeFrameMode(m)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${timeFrameMode === m ? 'bg-blue-600 text-white shadow-lg' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>
-                                            {m === 'all' ? 'All Data' : m === 'date' ? 'Specific Date' : m + ' View'}
+                                            {m === 'all' ? 'All Data' : m === 'date' ? 'Date Picker' : m + ' View'}
                                         </button>
                                     ))}
                                 </div>
@@ -370,7 +375,7 @@
                                             <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="font-bold text-xs p-2 rounded-xl border border-slate-200 bg-white" title="To" />
                                         </div>
                                     )}
-                                    {timeFrameMode === 'all' && <p className="text-xs font-bold text-slate-400 italic">Showing all data from the uploaded files...</p>}
+                                    {timeFrameMode === 'all' && <p className="text-xs font-bold text-slate-400 italic">Historical global search across all connected records...</p>}
                                 </div>
                             </div>
                         </div>
@@ -381,11 +386,11 @@
                             <div className="flex flex-col md:flex-row gap-4 border-b border-slate-200 pb-2">
                                 <div className="flex gap-8">
                                     <button onClick={() => setActiveTab('dashboard')} className={`pb-4 text-sm font-black transition-all relative ${activeTab === 'dashboard' ? 'text-blue-600' : 'text-slate-400'}`}>Visual Analytics {activeTab === 'dashboard' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}</button>
-                                    <button onClick={() => setActiveTab('table')} className={`pb-4 text-sm font-black transition-all relative ${activeTab === 'table' ? 'text-blue-600' : 'text-slate-400'}`}>Detailed Data {activeTab === 'table' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}</button>
+                                    <button onClick={() => setActiveTab('table')} className={`pb-4 text-sm font-black transition-all relative ${activeTab === 'table' ? 'text-blue-600' : 'text-slate-400'}`}>Data Table {activeTab === 'table' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600" />}</button>
                                 </div>
                                 <div className="flex-1 relative">
                                      <Icon name="search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                                     <input type="text" placeholder="Quick search..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-white border border-slate-100 rounded-full text-xs font-bold outline-none focus:ring-2 focus:ring-blue-100 shadow-sm" />
+                                     <input type="text" placeholder="Quick stock search..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-white border border-slate-100 rounded-full text-xs font-bold outline-none focus:ring-2 focus:ring-blue-100 shadow-sm" />
                                 </div>
                             </div>
 
@@ -425,7 +430,7 @@
 
                                     <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm min-h-[550px] chart-container">
                                         <h3 className="text-xl font-black text-slate-800 mb-8 uppercase tracking-tight flex items-center gap-3">
-                                            <Icon name="bar-chart-3" className="text-blue-600" /> Stock Occurrence Frequency (NSE Codes)
+                                            <Icon name="bar-chart-3" className="text-blue-600" /> Stock Hits Frequency (NSE Codes)
                                         </h3>
                                         <div className="h-[600px]">
                                             <ResponsiveContainer width="100%" height="100%">
@@ -488,7 +493,7 @@
                             </div>
                             <h2 className="text-5xl font-black text-slate-800 mb-3 tracking-tight">Alpha Insights</h2>
                             <p className="text-slate-400 font-bold max-w-sm mb-12 text-lg leading-relaxed">
-                                Select your folder with daily data and <span className="text-blue-600 underline">sector.xlsx</span> mapping.
+                                Select your folder with daily Nifty exports and your <span className="text-blue-600 underline">sector.xlsx</span> mapping.
                             </p>
                             <button onClick={handleSelectFolder} className="bg-slate-900 hover:bg-slate-800 text-white px-12 py-5 rounded-[2rem] font-black flex items-center gap-3 shadow-xl transition-all active:scale-95 text-lg">
                                 {isProcessing ? <Icon name="loader-2" className="animate-spin" /> : <Icon name="play" />} {isProcessing ? 'Crunching...' : 'Select Folder'}
