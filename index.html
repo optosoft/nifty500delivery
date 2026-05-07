@@ -99,11 +99,14 @@
                         
                         if (name === 'sector.xlsx') {
                             json.forEach(r => {
-                                const c = r['NSE code'] || r['Symbol'] || r['NSE Code'] || r['Ticker'];
-                                if (c) mapping[c.toString().trim()] = { 
-                                    sector: r['Sector'] || r['sector_name'] || 'Uncategorized', 
-                                    industry: r['Industry'] || r['industry_name'] || 'Uncategorized' 
-                                };
+                                const c = r['NSE code'] || r['Symbol'] || r['NSE Code'] || r['Ticker'] || r['NSE_CODE'] || r['symbol'];
+                                if (c) {
+                                    const key = c.toString().trim();
+                                    mapping[key] = { 
+                                        sector: r['Sector'] || r['sector_name'] || r['Sector Name'] || r['sector'] || 'Uncategorized', 
+                                        industry: r['Industry'] || r['industry_name'] || r['Industry Name'] || r['industry'] || 'Uncategorized' 
+                                    };
+                                }
                             });
                             foundMappingName = file.name;
                         } else {
@@ -158,7 +161,7 @@
                     const search = searchQuery.toLowerCase();
                     return s.stockName.toLowerCase().includes(search) || s.nseCode.toLowerCase().includes(search);
                 }).map(s => {
-                    const map = sectorIndustryMap[s.nseCode];
+                    const map = sectorIndustryMap[s.nseCode.trim()];
                     return { 
                         ...s, 
                         sector: map ? map.sector : (mappingFileName ? 'Not in Mapping' : 'Pending Mapping'),
@@ -171,7 +174,6 @@
                 const c = {}; filteredData.forEach(s => c[s.nseCode] = (c[s.nseCode] || 0) + 1); return c;
             }, [filteredData]);
 
-            // Hierarchy Drill-down Logic
             const drillChartData = useMemo(() => {
                 const counts = {};
                 const currentScope = filteredData.filter(s => {
@@ -187,7 +189,6 @@
                 return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
             }, [filteredData, drillPath]);
 
-            // Global Top Stocks
             const globalFreqData = useMemo(() => {
                 const counts = {};
                 filteredData.forEach(s => counts[s.nseCode] = (counts[s.nseCode] || 0) + 1);
@@ -197,7 +198,6 @@
                     .slice(0, 30);
             }, [filteredData]);
 
-            // Advanced Insight: Breadth
             const breadthInsights = useMemo(() => {
                 const groups = {};
                 filteredData.forEach(s => {
@@ -209,17 +209,16 @@
                     .sort((a,b) => b.score - a.score);
             }, [filteredData]);
 
-            // Advanced Insight: Accumulation Scatter
             const scatterData = useMemo(() => {
-                return filteredData.slice(0, 80).map(s => ({
+                return filteredData.slice(0, 100).map(s => ({
                     code: s.nseCode,
                     delivery: s.deliveryEod,
                     change: s.priceChange,
-                    cap: s.marketCap
+                    cap: s.marketCap,
+                    industry: s.industry
                 }));
             }, [filteredData]);
 
-            // Advanced Insight: PE vs Industry PE
             const valuationData = useMemo(() => {
                 const uniqueStocks = {};
                 filteredData.forEach(s => {
@@ -232,7 +231,8 @@
                     .map(s => ({
                         name: s.nseCode,
                         StockPE: s.pe,
-                        IndustryPE: s.indPe
+                        IndustryPE: s.indPe,
+                        industry: s.industry
                     }));
             }, [filteredData, appearanceCounts]);
 
@@ -247,19 +247,14 @@
                 });
             }, [filteredData, sortConfig, appearanceCounts]);
 
-            const resetToLevel = (level) => {
-                if (level === -1) setDrillPath([]);
-                else setDrillPath(prev => prev.slice(0, level + 1));
-            };
-
             return (
                 <div className="p-4 md:p-8 max-w-[1600px] mx-auto">
                     <header className="flex flex-col lg:flex-row justify-between items-center mb-8 gap-6">
                         <div>
                             <h1 className="text-4xl font-black text-slate-800 tracking-tight">Alpha Insights Unified</h1>
                             <p className="text-slate-400 text-xs font-bold uppercase tracking-[0.2em] mt-1 flex items-center">
-                                {rawData.length > 0 ? <span className="text-emerald-500 mr-2">● Active Folder</span> : <span className="text-slate-300 mr-2">○ Select Folder</span>}
-                                {mappingFileName || 'Awaiting sector.xlsx mapping'}
+                                {rawData.length > 0 ? <span className="text-emerald-500 mr-2">● Connected</span> : <span className="text-slate-300 mr-2">○ Disconnected</span>}
+                                {mappingFileName || 'sector.xlsx required for industry mapping'}
                             </p>
                         </div>
                         <div className="flex gap-3">
@@ -272,8 +267,8 @@
                         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 mb-10">
                             <div className="xl:col-span-3 card p-8 flex flex-col justify-center text-center">
                                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Delivery Threshold %</label>
-                                <input type="number" value={minDeliveryPct} onChange={e => setMinDeliveryPct(Number(e.target.value))} className="text-5xl font-black text-blue-600 outline-none w-full text-center" />
-                                <p className="text-[9px] font-bold text-slate-300 mt-2 uppercase italic tracking-tighter">Syncs Week & Month Minimums</p>
+                                <input type="number" value={minDeliveryPct} onChange={e => setMinDeliveryPct(Number(e.target.value))} className="text-5xl font-black text-blue-600 outline-none w-full text-center bg-transparent" />
+                                <p className="text-[9px] font-bold text-slate-300 mt-2 uppercase italic tracking-tighter">Syncs Weekly & Monthly Min.</p>
                             </div>
                             <div className="xl:col-span-9 card p-8">
                                 <div className="flex flex-wrap gap-2 mb-6">
@@ -290,8 +285,8 @@
                                     )}
                                     {timeFrameMode === 'month' && <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white">{["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m, i) => <option key={m} value={i}>{m}</option>)}</select>}
                                     {timeFrameMode === 'quarter' && <select value={selectedQuarter} onChange={e => setSelectedQuarter(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white"><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></select>}
-                                    {timeFrameMode === 'custom' && <div className="flex gap-2"><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border rounded-xl" /><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded-xl" /></div>}
-                                    {timeFrameMode === 'all' && <p className="text-sm font-bold text-slate-300 italic px-2">Analyzing entire history range</p>}
+                                    {timeFrameMode === 'custom' && <div className="flex gap-2"><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border rounded-xl bg-white text-sm" /><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded-xl bg-white text-sm" /></div>}
+                                    {timeFrameMode === 'all' && <p className="text-sm font-bold text-slate-300 italic px-2">Showing all records across selected folder</p>}
                                 </div>
                             </div>
                         </div>
@@ -302,7 +297,7 @@
                             <div className="flex gap-8 border-b border-slate-200">
                                 {['drilldown', 'insights', 'table'].map(t => (
                                     <button key={t} onClick={() => setActiveTab(t)} className={`pb-4 text-sm font-black uppercase tracking-widest transition-all relative ${activeTab === t ? 'text-blue-600' : 'text-slate-400'}`}>
-                                        {t === 'drilldown' ? 'Visual Dashboard' : t === 'insights' ? 'Advanced Insights' : 'Detailed Data Table'}
+                                        {t === 'drilldown' ? 'Visual Dashboard' : t === 'insights' ? 'Advanced Insights' : 'Data Table'}
                                         {activeTab === t && <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600 rounded-full" />}
                                     </button>
                                 ))}
@@ -337,7 +332,7 @@
                                     </div>
 
                                     <div className="card p-10 min-h-[550px]">
-                                        <h3 className="text-xl font-black text-slate-800 mb-10 flex items-center gap-2 uppercase tracking-tight">Top Stock Occurrence Freq (NSE)</h3>
+                                        <h3 className="text-xl font-black text-slate-800 mb-10 flex items-center gap-2 uppercase tracking-tight">Top Stock Occurrence Freq (NSE Codes)</h3>
                                         <div className="h-[600px] chart-container">
                                             <ResponsiveContainer width="100%" height="100%">
                                                 <BarChart data={globalFreqData} layout="vertical" margin={{ right: 100, left: 20 }}>
@@ -357,7 +352,6 @@
 
                             {activeTab === 'insights' && (
                                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                                    {/* Insight 1: Market Breadth */}
                                     <div className="lg:col-span-8 card p-10 min-h-[500px]">
                                         <h3 className="text-xl font-black text-slate-800 mb-8 flex items-center gap-2">Market Breadth: % Above SMA 200</h3>
                                         <div className="h-[400px] chart-container">
@@ -376,7 +370,6 @@
                                         </div>
                                     </div>
 
-                                    {/* Insight 2: Cap Distribution */}
                                     <div className="lg:col-span-4 card p-10 flex flex-col items-center">
                                         <h3 className="text-xl font-black text-slate-800 self-start mb-10">Market Cap Strategy Mix</h3>
                                         <div className="h-[300px] w-full">
@@ -396,7 +389,6 @@
                                         </div>
                                     </div>
 
-                                    {/* New Insight: Accumulation Scatter */}
                                     <div className="lg:col-span-12 card p-10 min-h-[600px]">
                                         <h3 className="text-xl font-black text-slate-800 mb-8 flex items-center gap-2">Accumulation Plot: Delivery % vs. Price Change %</h3>
                                         <div className="h-[450px]">
@@ -412,6 +404,7 @@
                                                             return (
                                                                 <div className="bg-white p-4 rounded-2xl shadow-2xl border border-slate-50 font-black">
                                                                     <p className="text-blue-600 mb-1">{data.code}</p>
+                                                                    <div className="text-[10px] text-slate-400 uppercase">Industry: {data.industry}</div>
                                                                     <div className="text-[10px] text-slate-400 uppercase">Delivery: {data.delivery}%</div>
                                                                     <div className="text-[10px] text-slate-400 uppercase">Change: {data.change}%</div>
                                                                     <div className="text-[10px] text-slate-400 uppercase">M-Cap: ₹{Math.round(data.cap)}Cr</div>
@@ -424,19 +417,8 @@
                                                 </ScatterChart>
                                             </ResponsiveContainer>
                                         </div>
-                                        <div className="mt-6 flex flex-wrap gap-8 justify-center border-t border-slate-50 pt-8">
-                                            <div className="text-center px-6 border-r border-slate-100 last:border-none">
-                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bottom-Right Quadrant</p>
-                                                <p className="text-xs font-bold text-slate-600 mt-1">Quiet Accumulation (Institutional absorption)</p>
-                                            </div>
-                                            <div className="text-center px-6 border-r border-slate-100 last:border-none">
-                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Top-Right Quadrant</p>
-                                                <p className="text-xs font-bold text-slate-600 mt-1">Active Breakout (High-demand surge)</p>
-                                            </div>
-                                        </div>
                                     </div>
 
-                                    {/* New Insight: Relative Valuation */}
                                     <div className="lg:col-span-12 card p-10 min-h-[550px]">
                                         <h3 className="text-xl font-black text-slate-800 mb-10 flex items-center gap-2 uppercase tracking-tight">Valuation Explorer: Stock PE vs. Industry PE</h3>
                                         <div className="h-[450px] chart-container">
@@ -445,14 +427,26 @@
                                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                                     <XAxis dataKey="name" tick={{fontSize: 10, fontWeight: 900}} />
                                                     <YAxis stroke="#cbd5e1" tick={{fontSize: 10}} label={{ value: 'P/E Ratio', angle: -90, position: 'insideLeft', fontSize: 10, fontWeight: 900 }} />
-                                                    <Tooltip contentStyle={{borderRadius: '20px', border: 'none'}} />
+                                                    <Tooltip contentStyle={{borderRadius: '20px', border: 'none'}} content={({ active, payload }) => {
+                                                        if (active && payload && payload.length) {
+                                                            const d = payload[0].payload;
+                                                            return (
+                                                                <div className="bg-white p-4 rounded-2xl shadow-2xl border border-slate-50 font-black">
+                                                                    <p className="text-blue-600 mb-1">{d.name}</p>
+                                                                    <p className="text-[10px] text-slate-400 uppercase mb-2">{d.industry}</p>
+                                                                    <div className="flex justify-between gap-4 text-xs"><span>Stock PE:</span> <span>{d.StockPE}</span></div>
+                                                                    <div className="flex justify-between gap-4 text-xs"><span>Industry PE:</span> <span>{d.IndustryPE}</span></div>
+                                                                </div>
+                                                            );
+                                                        }
+                                                        return null;
+                                                    }} />
                                                     <Legend verticalAlign="top" height={36} />
                                                     <Bar dataKey="StockPE" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={16} />
                                                     <Bar dataKey="IndustryPE" fill="#e2e8f0" radius={[4, 4, 0, 0]} barSize={16} />
                                                 </BarChart>
                                             </ResponsiveContainer>
                                         </div>
-                                        <p className="mt-6 text-center text-[10px] font-black text-slate-300 uppercase tracking-widest">Identify "Value Momentum" where Stock PE is below Industry Average</p>
                                     </div>
                                 </div>
                             )}
@@ -485,7 +479,7 @@
                                                         <td className="p-6 text-[10px] font-black text-slate-400">{s.date}</td>
                                                         <td className="p-6 font-black text-slate-800 uppercase tracking-tighter">{s.nseCode}</td>
                                                         <td className="p-6"><div className="text-xs font-black text-slate-700">{s.sector}</div><div className="text-[10px] font-bold text-slate-300 uppercase tracking-tighter">{s.industry}</div></td>
-                                                        <td className="p-6 text-center"><span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-black border border-blue-100">{appearanceCounts[s.nseCode]}</span></td>
+                                                        <td className="p-6 text-center"><span className="bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-xs font-black border border-blue-100">{appearanceCounts[s.nseCode]}</span></td>
                                                         <td className="p-6 font-black text-emerald-600">{s.deliveryEod}%</td>
                                                     </tr>
                                                 ))}
@@ -503,9 +497,9 @@
                                 <Icons.Folder />
                             </div>
                             <h2 className="text-5xl font-black text-slate-800 mb-4 tracking-tight">Alpha Engine</h2>
-                            <p className="text-slate-400 font-bold max-w-md mb-12 text-lg">Select folder with daily nifty tracking files and <span className="text-blue-600 underline underline-offset-4 decoration-2">sector.xlsx</span>.</p>
+                            <p className="text-slate-400 font-bold max-w-md mb-12 text-lg leading-relaxed">Select folder with daily nifty tracking files and <span className="text-blue-600 underline underline-offset-4 decoration-2">sector.xlsx</span> mapping.</p>
                             <button onClick={handleSelectFolder} className="bg-slate-900 hover:bg-slate-800 text-white px-12 py-5 rounded-[2rem] font-black flex items-center gap-3 shadow-xl transition-all active:scale-95 text-xl">
-                                {isProcessing ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/> : <Icons.Folder />} {isProcessing ? 'Processing...' : 'Connect Folder'}
+                                {isProcessing ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/> : <Icons.Folder />} {isProcessing ? 'Crunching Data...' : 'Connect Folder'}
                             </button>
                         </div>
                     )}
