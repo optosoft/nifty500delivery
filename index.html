@@ -65,25 +65,34 @@
             const [sortConfig, setSortConfig] = useState({ key: 'hits', direction: 'desc' });
             const [isProcessing, setIsProcessing] = useState(false);
 
+            const fallbackInputRef = useRef(null);
             const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#64748b'];
 
             const mapRowToStock = (row, date) => {
-                const nseCode = (row['NSE code'] || row['Symbol'] || row['NSE Code'] || row['Ticker'])?.toString().trim();
+                // Fuzzy key lookup for daily files
+                const keys = Object.keys(row);
+                const getVal = (targets) => {
+                    const match = keys.find(k => targets.includes(k.toLowerCase().trim()));
+                    return match ? row[match] : null;
+                };
+
+                const nseCode = (getVal(['nse code', 'symbol', 'ticker', 'code']))?.toString().trim();
                 if (!nseCode) return null;
+
                 return {
                     date, nseCode,
-                    stockName: row['Stock Name'] || row['Name'] || 'Unknown',
-                    deliveryEod: parseFloat(row['Delivery% volume end of day']) || 0,
-                    deliveryAvgWeek: parseFloat(row['Delivery% volume Avg Week']) || 0,
-                    deliveryAvgMonth: parseFloat(row['Delivery% volume Avg Month']) || 0,
-                    deliveryAvg6Month: parseFloat(row['Delivery% volume Avg 6Month']) || 0,
-                    price: parseFloat(row['Current Price'] || row['Price'] || row['LTP']) || 0,
-                    sma200: parseFloat(row['Day SMA200'] || row['SMA 200']) || 0,
-                    sma50: parseFloat(row['Day SMA50'] || row['SMA 50']) || 0,
-                    priceChange: parseFloat(row['Day change %'] || row['Change %']) || 0,
-                    marketCap: parseFloat(row['Market Capitalization'] || row['Market Cap']) || 0,
-                    pe: parseFloat(row['PE TTM Price to Earnings'] || row['PE']) || 0,
-                    indPe: parseFloat(row['Industry PE TTM'] || row['Industry PE']) || 0
+                    stockName: getVal(['stock name', 'name', 'company name']) || 'Unknown',
+                    deliveryEod: parseFloat(getVal(['delivery% volume end of day', 'delivery %', 'delivery percentage'])) || 0,
+                    deliveryAvgWeek: parseFloat(getVal(['delivery% volume avg week', 'avg week delivery'])) || 0,
+                    deliveryAvgMonth: parseFloat(getVal(['delivery% volume avg month', 'avg month delivery'])) || 0,
+                    deliveryAvg6Month: parseFloat(getVal(['delivery% volume avg 6month', 'avg 6 month delivery'])) || 0,
+                    price: parseFloat(getVal(['current price', 'price', 'ltp', 'close'])) || 0,
+                    sma200: parseFloat(getVal(['day sma200', 'sma 200', 'sma200'])) || 0,
+                    sma50: parseFloat(getVal(['day sma50', 'sma 50', 'sma50'])) || 0,
+                    priceChange: parseFloat(getVal(['day change %', 'change %', 'chg %'])) || 0,
+                    marketCap: parseFloat(getVal(['market capitalization', 'market cap', 'mcap'])) || 0,
+                    pe: parseFloat(getVal(['pe ttm price to earnings', 'pe', 'p/e'])) || 0,
+                    indPe: parseFloat(getVal(['industry pe ttm', 'industry pe', 'ind pe'])) || 0
                 };
             };
 
@@ -103,12 +112,20 @@
                         
                         if (name === 'sector.xlsx') {
                             json.forEach(r => {
-                                const c = r['NSE code'] || r['Symbol'] || r['NSE Code'] || r['Ticker'] || r['symbol'];
-                                if (c) {
-                                    const key = c.toString().trim();
-                                    mapping[key] = { 
-                                        sector: r['Sector'] || r['sector_name'] || 'Uncategorized', 
-                                        industry: r['Industry'] || r['industry_name'] || 'Uncategorized' 
+                                const rKeys = Object.keys(r);
+                                const findHeaderVal = (targets) => {
+                                    const match = rKeys.find(k => targets.includes(k.toLowerCase().trim()));
+                                    return match ? r[match] : null;
+                                };
+
+                                const code = findHeaderVal(['nse code', 'symbol', 'ticker', 'code', 'nse_code']);
+                                const sector = findHeaderVal(['sector', 'sector_name', 'sector name']);
+                                const industry = findHeaderVal(['industry', 'industry name', 'industry_name']);
+
+                                if (code) {
+                                    mapping[code.toString().trim().toUpperCase()] = { 
+                                        sector: (sector || 'Uncategorized').toString().trim(), 
+                                        industry: (industry || 'Uncategorized').toString().trim() 
                                     };
                                 }
                             });
@@ -145,31 +162,22 @@
                 }
             };
 
-            // Scoring Engine
             const calculateScores = (s) => {
                 let mom = 0, rev = 0, vol = 0;
-                
-                // Momentum Score (Max 5)
                 if (s.price > s.sma200) mom++;
                 if (s.price > s.sma50) mom++;
                 if (s.sma50 > s.sma200) mom++;
                 if (s.priceChange > 0) mom++;
                 if (s.priceChange > 2) mom++;
-
-                // Reversion Score (Max 4)
                 if (s.price < s.sma200) rev++;
                 if (s.price < s.sma50) rev++;
-                if (s.priceChange > 0) rev++; // Attempting bounce
+                if (s.priceChange > 0) rev++;
                 if (s.deliveryEod > s.deliveryAvg6Month) rev++;
-
-                // Volume Score (Max 4)
                 if (s.deliveryEod > s.deliveryAvgWeek) vol++;
                 if (s.deliveryEod > s.deliveryAvgMonth) vol++;
                 if (s.deliveryEod > 70) vol++;
                 if (s.priceChange > 0) vol++;
-
                 const comp = (mom * 0.4) + (rev * 0.4) + (vol * 0.2);
-
                 return { mom, rev, vol, comp };
             };
 
@@ -190,7 +198,6 @@
                     const baseMomentum = s.deliveryEod > s.deliveryAvg6Month && s.deliveryAvgWeek >= minDeliveryPct && s.deliveryAvgMonth >= minDeliveryPct;
                     if (!baseMomentum) return false;
 
-                    // Strategy Logic
                     const scores = calculateScores(s);
                     if (activeStrategy === 'momentum' && scores.mom < 4) return false;
                     if (activeStrategy === 'reversion' && scores.rev < 2) return false;
@@ -200,13 +207,13 @@
                     const search = searchQuery.toLowerCase();
                     return s.stockName.toLowerCase().includes(search) || s.nseCode.toLowerCase().includes(search);
                 }).map(s => {
-                    const map = sectorIndustryMap[s.nseCode.trim()];
+                    const map = sectorIndustryMap[s.nseCode.trim().toUpperCase()];
                     const scores = calculateScores(s);
                     return { 
                         ...s, 
                         ...scores,
-                        sector: map ? map.sector : (mappingFileName ? 'Not in Mapping' : 'Pending Mapping'),
-                        industry: map ? map.industry : (mappingFileName ? 'Not in Mapping' : 'Pending Mapping')
+                        sector: map ? map.sector : (mappingFileName ? 'Uncategorized' : 'Pending Mapping'),
+                        industry: map ? map.industry : (mappingFileName ? 'Uncategorized' : 'Pending Mapping')
                     };
                 });
             }, [rawData, sectorIndustryMap, mappingFileName, minDeliveryPct, timeFrameMode, selectedDate, startDate, endDate, selectedMonth, selectedQuarter, selectedYear, searchQuery, activeStrategy]);
@@ -235,13 +242,35 @@
                 return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 30);
             }, [filteredData]);
 
+            const breadthInsights = useMemo(() => {
+                const groups = {};
+                filteredData.forEach(s => {
+                    if (!groups[s.sector]) groups[s.sector] = { name: s.sector, total: 0, healthy: 0 };
+                    groups[s.sector].total++;
+                    if (s.price > s.sma200) groups[s.sector].healthy++;
+                });
+                return Object.values(groups).map(g => ({ name: g.name, score: Math.round((g.healthy/g.total)*100) }))
+                    .sort((a,b) => b.score - a.score);
+            }, [filteredData]);
+
+            const scatterData = useMemo(() => {
+                return filteredData.slice(0, 100).map(s => ({ code: s.nseCode, delivery: s.deliveryEod, change: s.priceChange, cap: s.marketCap, industry: s.industry }));
+            }, [filteredData]);
+
+            const valuationData = useMemo(() => {
+                const uniqueStocks = {};
+                filteredData.forEach(s => { if (!uniqueStocks[s.nseCode]) uniqueStocks[s.nseCode] = s; });
+                return Object.values(uniqueStocks).filter(s => s.pe > 0 && s.indPe > 0).sort((a, b) => (appearanceCounts[b.nseCode] || 0) - (appearanceCounts[a.nseCode] || 0)).slice(0, 20).map(s => ({ name: s.nseCode, StockPE: s.pe, IndustryPE: s.indPe, industry: s.industry }));
+            }, [filteredData, appearanceCounts]);
+
             const sortedTable = useMemo(() => {
                 const data = [...filteredData];
                 if (!sortConfig.key) return data;
                 return data.sort((a,b) => {
                     const aV = sortConfig.key === 'hits' ? appearanceCounts[a.nseCode] : a[sortConfig.key];
                     const bV = sortConfig.key === 'hits' ? appearanceCounts[b.nseCode] : b[sortConfig.key];
-                    return (sortConfig.direction === 'asc' ? 1 : -1) * (aV > bV ? 1 : -1);
+                    const factor = sortConfig.direction === 'asc' ? 1 : -1;
+                    return aV > bV ? factor : -factor;
                 });
             }, [filteredData, sortConfig, appearanceCounts]);
 
@@ -249,10 +278,10 @@
                 <div className="p-4 md:p-8 max-w-[1600px] mx-auto">
                     <header className="flex flex-col lg:flex-row justify-between items-center mb-8 gap-6">
                         <div>
-                            <h1 className="text-4xl font-black text-slate-800 tracking-tight">Alpha Insights Unified</h1>
+                            <h1 className="text-4xl font-black text-slate-800 tracking-tight italic">Alpha Insight Engine</h1>
                             <p className="text-slate-400 text-xs font-bold uppercase tracking-[0.2em] mt-1 flex items-center">
                                 {rawData.length > 0 ? <span className="text-emerald-500 mr-2 font-black">● LIVE</span> : <span className="text-slate-300 mr-2">○ DISCONNECTED</span>}
-                                {mappingFileName || 'sector.xlsx required'}
+                                {mappingFileName || 'sector.xlsx required for mapping'}
                             </p>
                         </div>
                         <div className="flex gap-3">
@@ -275,21 +304,20 @@
                                     ))}
                                 </div>
                                 <div className="flex flex-wrap items-end gap-4 min-h-[60px]">
-                                    {timeFrameMode === 'date' && <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white" />}
+                                    {timeFrameMode === 'date' && <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white shadow-sm" />}
                                     {(timeFrameMode === 'month' || timeFrameMode === 'quarter' || timeFrameMode === 'year') && (
-                                        <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white">
+                                        <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white shadow-sm">
                                             {[...new Set(rawData.map(d => d.date.split('-')[0]))].sort().map(y => <option key={y} value={y}>{y}</option>)}
                                         </select>
                                     )}
-                                    {timeFrameMode === 'month' && <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white">{["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m, i) => <option key={m} value={i}>{m}</option>)}</select>}
-                                    {timeFrameMode === 'quarter' && <select value={selectedQuarter} onChange={e => setSelectedQuarter(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white"><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></select>}
-                                    {timeFrameMode === 'custom' && <div className="flex gap-2"><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border rounded-xl bg-white text-sm" /><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded-xl bg-white text-sm" /></div>}
-                                    {timeFrameMode === 'all' && <p className="text-sm font-bold text-slate-300 italic px-2">Global History Scan Active</p>}
+                                    {timeFrameMode === 'month' && <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white shadow-sm">{["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m, i) => <option key={m} value={i}>{m}</option>)}</select>}
+                                    {timeFrameMode === 'quarter' && <select value={selectedQuarter} onChange={e => setSelectedQuarter(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white shadow-sm"><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></select>}
+                                    {timeFrameMode === 'custom' && <div className="flex gap-2"><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border rounded-xl bg-white shadow-sm text-sm" /><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded-xl bg-white shadow-sm text-sm" /></div>}
+                                    {timeFrameMode === 'all' && <p className="text-sm font-bold text-slate-300 italic px-2">Scanning {rawData.length} historical snapshots...</p>}
                                 </div>
                             </div>
                         </div>
 
-                        {/* 4 Strategy Tabs */}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
                             {[
                                 { id: 'momentum', label: 'Momentum', icon: '🚀', desc: 'SMA Trends', color: 'blue' },
@@ -300,7 +328,7 @@
                                 <button 
                                     key={s.id} 
                                     onClick={() => setActiveStrategy(activeStrategy === s.id ? 'none' : s.id)}
-                                    className={`strategy-btn p-6 rounded-[2rem] border text-left flex items-start gap-4 ${activeStrategy === s.id ? `bg-${s.color}-600 border-${s.color}-600 strategy-active` : 'bg-white border-slate-100 hover:border-slate-300'}`}
+                                    className={`strategy-btn p-6 rounded-[2rem] border text-left flex items-start gap-4 ${activeStrategy === s.id ? `bg-${s.color}-600 border-${s.color}-600 strategy-active` : 'bg-white border-slate-100 hover:border-slate-300 shadow-sm'}`}
                                 >
                                     <span className="text-3xl">{s.icon}</span>
                                     <div>
@@ -318,7 +346,7 @@
                             <div className="flex gap-8 border-b border-slate-200">
                                 {['drilldown', 'insights', 'table'].map(t => (
                                     <button key={t} onClick={() => setActiveTab(t)} className={`pb-4 text-sm font-black uppercase tracking-widest transition-all relative ${activeTab === t ? 'text-blue-600' : 'text-slate-400'}`}>
-                                        {t === 'drilldown' ? 'Visual Dashboard' : t === 'insights' ? 'Advanced Analytics' : 'Data Explorer'}
+                                        {t === 'drilldown' ? 'Visual Dashboard' : t === 'insights' ? 'Advanced Analytics' : 'Stock Explorer'}
                                         {activeTab === t && <div className="absolute bottom-0 left-0 right-0 h-1 bg-blue-600 rounded-full" />}
                                     </button>
                                 ))}
@@ -359,6 +387,7 @@
                                                     <CartesianGrid strokeDasharray="3 3" vertical={true} horizontal={false} stroke="#f1f5f9" />
                                                     <XAxis type="number" stroke="#cbd5e1" domain={[0, (max) => Math.ceil(max * 1.3)]} />
                                                     <YAxis type="category" dataKey="name" width={100} interval={0} stroke="#cbd5e1" />
+                                                    <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '16px', border: 'none'}} />
                                                     <Bar dataKey="value" fill="#3b82f6" radius={[0, 6, 6, 0]} barSize={15}>
                                                         <LabelList dataKey="value" position="right" style={{fontSize: '10px', fontWeight: 900}} offset={12} />
                                                     </Bar>
@@ -370,38 +399,86 @@
                             )}
 
                             {activeTab === 'insights' && (
-                                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                                    <div className="lg:col-span-8 card p-10">
-                                        <h3 className="text-xl font-black text-slate-800 mb-8 uppercase tracking-tight">Market Breadth: % Above SMA 200</h3>
-                                        <div className="h-[400px] chart-container">
+                                <div className="space-y-8">
+                                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                                        <div className="lg:col-span-8 card p-10 min-h-[450px]">
+                                            <h3 className="text-xl font-black text-slate-800 mb-8 uppercase tracking-tight italic">Sector Breadth (% > SMA 200)</h3>
+                                            <div className="h-[350px] chart-container">
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <BarChart data={breadthInsights} layout="vertical" margin={{ right: 80, left: 20 }}>
+                                                        <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
+                                                        <XAxis type="number" domain={[0, 100]} stroke="#cbd5e1" />
+                                                        <YAxis type="category" dataKey="name" width={160} interval={0} stroke="#cbd5e1" />
+                                                        <Tooltip />
+                                                        <Bar dataKey="score" radius={[0, 6, 6, 0]} barSize={12}>
+                                                            {breadthInsights.map((e, i) => <Cell key={i} fill={e.score > 70 ? '#10b981' : e.score > 40 ? '#3b82f6' : '#ef4444'} />)}
+                                                            <LabelList dataKey="score" position="right" formatter={v => `${v}%`} style={{fontSize: '10px', fontWeight: 900}} />
+                                                        </Bar>
+                                                    </BarChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                        </div>
+                                        <div className="lg:col-span-4 card p-10 flex flex-col items-center">
+                                            <h3 className="text-xl font-black text-slate-800 self-start mb-10">Market Cap Mix</h3>
+                                            <div className="h-[250px] w-full">
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <PieChart>
+                                                        <Pie data={[
+                                                            {n:'Large Cap',v:filteredData.filter(s=>s.marketCap>20000).length},
+                                                            {n:'Mid Cap',v:filteredData.filter(s=>s.marketCap>5000&&s.marketCap<=20000).length},
+                                                            {n:'Small Cap',v:filteredData.filter(s=>s.marketCap<=5000).length}
+                                                        ]} dataKey="v" nameKey="n" innerRadius={60} outerRadius={90} paddingAngle={10}>
+                                                            {COLORS.map((c, i) => <Cell key={i} fill={c} />)}
+                                                        </Pie>
+                                                        <Tooltip />
+                                                        <Legend verticalAlign="bottom" />
+                                                    </PieChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Quiet Buy & Valuation */}
+                                    <div className="card p-10">
+                                        <h3 className="text-xl font-black text-slate-800 mb-8 uppercase tracking-tight italic">Quiet Accumulation (Delivery vs Chg)</h3>
+                                        <div className="h-[450px]">
                                             <ResponsiveContainer width="100%" height="100%">
-                                                <BarChart data={breadthInsights} layout="vertical" margin={{ right: 80, left: 20 }}>
-                                                    <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#f1f5f9" />
-                                                    <XAxis type="number" domain={[0, 100]} stroke="#cbd5e1" />
-                                                    <YAxis type="category" dataKey="name" width={160} interval={0} />
-                                                    <Tooltip />
-                                                    <Bar dataKey="score" radius={[0, 6, 6, 0]} barSize={12}>
-                                                        {breadthInsights.map((e, i) => <Cell key={i} fill={e.score > 70 ? '#10b981' : e.score > 40 ? '#3b82f6' : '#ef4444'} />)}
-                                                    </Bar>
-                                                </BarChart>
+                                                <ScatterChart margin={{ top: 20, right: 30, bottom: 20, left: 10 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                                                    <XAxis type="number" dataKey="delivery" name="Delivery" unit="%" stroke="#cbd5e1" label={{ value: 'Delivery %', position: 'bottom', offset: -10, fontSize: 10, fontWeight: 900 }} />
+                                                    <YAxis type="number" dataKey="change" name="Price Change" unit="%" stroke="#cbd5e1" label={{ value: 'Chg %', angle: -90, position: 'insideLeft', fontSize: 10, fontWeight: 900 }} />
+                                                    <ZAxis type="number" dataKey="cap" range={[60, 600]} name="Market Cap" />
+                                                    <Tooltip cursor={{ strokeDasharray: '3 3' }} content={({ active, payload }) => {
+                                                        if (active && payload && payload.length) {
+                                                            const d = payload[0].payload;
+                                                            return <div className="bg-white p-4 rounded-2xl shadow-2xl border border-slate-50 font-black">
+                                                                <p className="text-blue-600 mb-1">{d.code}</p>
+                                                                <div className="text-[10px] text-slate-400 uppercase">Industry: {d.industry}</div>
+                                                                <div className="text-[10px] text-slate-400 uppercase">Delivery: {d.delivery}%</div>
+                                                                <div className="text-[10px] text-slate-400 uppercase">Chg: {d.change}%</div>
+                                                            </div>;
+                                                        }
+                                                        return null;
+                                                    }} />
+                                                    <Scatter data={scatterData} fill="#3b82f6" fillOpacity={0.6} />
+                                                </ScatterChart>
                                             </ResponsiveContainer>
                                         </div>
                                     </div>
-                                    <div className="lg:col-span-4 card p-10 flex flex-col items-center">
-                                        <h3 className="text-xl font-black text-slate-800 self-start mb-10">Market Cap Mix</h3>
-                                        <div className="h-[300px] w-full">
+
+                                    <div className="card p-10">
+                                        <h3 className="text-xl font-black text-slate-800 mb-10 uppercase tracking-tight italic">Valuation Explorer (PE vs Industry)</h3>
+                                        <div className="h-[400px]">
                                             <ResponsiveContainer width="100%" height="100%">
-                                                <PieChart>
-                                                    <Pie data={[
-                                                        {n:'Large Cap',v:filteredData.filter(s=>s.marketCap>20000).length},
-                                                        {n:'Mid Cap',v:filteredData.filter(s=>s.marketCap>5000&&s.marketCap<=20000).length},
-                                                        {n:'Small Cap',v:filteredData.filter(s=>s.marketCap<=5000).length}
-                                                    ]} dataKey="v" nameKey="n" innerRadius={70} outerRadius={110} paddingAngle={10}>
-                                                        {COLORS.map((c, i) => <Cell key={i} fill={c} />)}
-                                                    </Pie>
-                                                    <Tooltip />
-                                                    <Legend verticalAlign="bottom" />
-                                                </PieChart>
+                                                <BarChart data={valuationData} margin={{ right: 40, left: 20 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                                    <XAxis dataKey="name" tick={{fontSize: 10, fontWeight: 900}} />
+                                                    <YAxis stroke="#cbd5e1" tick={{fontSize: 10}} />
+                                                    <Tooltip contentStyle={{borderRadius: '20px', border: 'none'}} />
+                                                    <Legend verticalAlign="top" height={36} />
+                                                    <Bar dataKey="StockPE" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={16} />
+                                                    <Bar dataKey="IndustryPE" fill="#e2e8f0" radius={[4, 4, 0, 0]} barSize={16} />
+                                                </BarChart>
                                             </ResponsiveContainer>
                                         </div>
                                     </div>
@@ -411,15 +488,15 @@
                             {activeTab === 'table' && (
                                 <div className="card overflow-hidden">
                                     <div className="p-4 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
-                                        <input type="text" placeholder="Quick Search (e.g. RELIANCE)..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full max-w-md p-3 bg-white border border-slate-100 rounded-2xl text-xs font-bold outline-none" />
-                                        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-4">{filteredData.length} Results Found</div>
+                                        <input type="text" placeholder="Quick Search (e.g. RELIANCE)..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full max-w-md p-3 bg-white border border-slate-100 rounded-2xl text-xs font-bold outline-none shadow-sm" />
+                                        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-4">{filteredData.length} Results Matching Filters</div>
                                     </div>
                                     <div className="overflow-x-auto table-scroll">
                                         <table className="w-full text-left border-collapse">
                                             <thead className="bg-slate-50 border-b border-slate-100 text-[10px] font-black uppercase text-slate-400 tracking-widest">
                                                 <tr>
-                                                    {[{k:'date', l:'Date'}, {k:'nseCode', l:'NSE Code'}, {k:'sector', l:'Classification'}, {k:'hits', l:'Hits'}, {k:'comp', l:'Strategy Score'}, {k:'deliveryEod', l:'Del %'}].map(h => (
-                                                        <th key={h.k} className="p-6 cursor-pointer hover:bg-slate-100" onClick={() => setSortConfig(p => ({key:h.k, direction: p.key===h.k&&p.direction==='desc'?'asc':'desc'}))}>
+                                                    {[{k:'date', l:'Date'}, {k:'nseCode', l:'NSE Code'}, {k:'sector', l:'Sector'}, {k:'industry', l:'Industry'}, {k:'hits', l:'Hits'}, {k:'comp', l:'Strategy'}, {k:'deliveryEod', l:'Del %'}].map(h => (
+                                                        <th key={h.k} className="p-6 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => setSortConfig(p => ({key:h.k, direction: p.key===h.k&&p.direction==='desc'?'asc':'desc'}))}>
                                                             <div className="flex items-center">{h.l} {sortConfig.key===h.k && <Icons.Sort d={sortConfig.direction} />}</div>
                                                         </th>
                                                     ))}
@@ -429,15 +506,16 @@
                                                 {sortedTable.map((s, i) => (
                                                     <tr key={i} className="hover:bg-blue-50/40 transition-colors text-sm">
                                                         <td className="p-6 text-[10px] font-black text-slate-400">{s.date}</td>
-                                                        <td className="p-6 font-black text-slate-800 uppercase">{s.nseCode}</td>
-                                                        <td className="p-6"><div className="text-xs font-black text-slate-700">{s.sector}</div><div className="text-[10px] font-bold text-slate-300 uppercase">{s.industry}</div></td>
+                                                        <td className="p-6 font-black text-slate-800 uppercase tracking-tighter">{s.nseCode}</td>
+                                                        <td className="p-6 text-xs font-black text-slate-700 uppercase">{s.sector}</td>
+                                                        <td className="p-6 text-[10px] font-bold text-slate-300 uppercase tracking-tighter">{s.industry}</td>
                                                         <td className="p-6 text-center"><span className="bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-xs font-black border border-blue-100">{appearanceCounts[s.nseCode]}</span></td>
                                                         <td className="p-6">
                                                             <div className="flex flex-col gap-1">
                                                                 <div className="h-1.5 w-16 bg-slate-100 rounded-full overflow-hidden">
                                                                     <div className="h-full bg-blue-500" style={{ width: `${(s.comp / 5) * 100}%` }}></div>
                                                                 </div>
-                                                                <span className="text-[9px] font-black text-slate-400 uppercase">Score: {s.comp.toFixed(1)}</span>
+                                                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Score: {s.comp.toFixed(1)}</span>
                                                             </div>
                                                         </td>
                                                         <td className="p-6 font-black text-emerald-600">{s.deliveryEod}%</td>
@@ -456,10 +534,10 @@
                             <div className="bg-blue-600 text-white p-10 rounded-[2.5rem] shadow-2xl mb-10 transform -rotate-2 shadow-blue-500/40">
                                 <Icons.Folder />
                             </div>
-                            <h2 className="text-5xl font-black text-slate-800 mb-4 tracking-tight">Alpha Engine</h2>
-                            <p className="text-slate-400 font-bold max-w-md mb-12 text-lg leading-relaxed">Connect folder with daily nifty tracking files and <span className="text-blue-600 underline underline-offset-4 decoration-2">sector.xlsx</span> mapping.</p>
+                            <h2 className="text-5xl font-black text-slate-800 mb-4 tracking-tight leading-tight italic">Momentum Engine</h2>
+                            <p className="text-slate-400 font-bold max-w-md mb-12 text-lg leading-relaxed">Load your daily nifty CSVs/XLSXs and <span className="text-blue-600 underline underline-offset-4 decoration-2">sector.xlsx</span> to begin.</p>
                             <button onClick={handleSelectFolder} className="bg-slate-900 hover:bg-slate-800 text-white px-12 py-5 rounded-[2rem] font-black flex items-center gap-3 shadow-xl transition-all active:scale-95 text-xl">
-                                {isProcessing ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/> : <Icons.Folder />} {isProcessing ? 'Crunching Data...' : 'Connect Folder'}
+                                {isProcessing ? <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"/> : <Icons.Folder />} {isProcessing ? 'Reading Data...' : 'Select Data Folder'}
                             </button>
                         </div>
                     )}
