@@ -58,6 +58,9 @@
             const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
             const [selectedQuarter, setSelectedQuarter] = useState(1);
             const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+            const [selectedWeek, setSelectedWeek] = useState(1);
+            const [selectedWeekYear, setSelectedWeekYear] = useState(new Date().getFullYear());
+            const [selectedRecentDays, setSelectedRecentDays] = useState(7);
             const [searchQuery, setSearchQuery] = useState('');
             const [activeTab, setActiveTab] = useState('drilldown');
             const [activeStrategy, setActiveStrategy] = useState('none');
@@ -181,7 +184,22 @@
                 return { mom, rev, vol, comp };
             };
 
+            const getISOWeek = (dateStr) => {
+                const [y, m, d] = dateStr.split('-').map(Number);
+                const date = new Date(y, m - 1, d);
+                const jan4 = new Date(y, 0, 4);
+                const msPerDay = 86400000;
+                return Math.round((date - new Date(jan4.getFullYear(), 0, 4)) / msPerDay / 7) + 1;
+            };
+
             const filteredData = useMemo(() => {
+                let recentStartDate = '';
+                if (timeFrameMode === 'recent' && rawData.length > 0) {
+                    const uniqueDates = [...new Set(rawData.map(s => s.date))].sort();
+                    const startIdx = Math.max(0, uniqueDates.length - selectedRecentDays);
+                    recentStartDate = uniqueDates[startIdx];
+                }
+
                 return rawData.filter(s => {
                     const dParts = s.date.split('-');
                     const y = parseInt(dParts[0]);
@@ -193,6 +211,11 @@
                         if (!qms.includes(m) || y !== parseInt(selectedYear)) return false;
                     }
                     if (timeFrameMode === 'year' && y !== parseInt(selectedYear)) return false;
+                    if (timeFrameMode === 'week') {
+                        const w = getISOWeek(s.date);
+                        if (w !== parseInt(selectedWeek) || y !== parseInt(selectedWeekYear)) return false;
+                    }
+                    if (timeFrameMode === 'recent' && s.date < recentStartDate) return false;
                     if (timeFrameMode === 'custom' && ((startDate && s.date < startDate) || (endDate && s.date > endDate))) return false;
 
                     const baseMomentum = s.deliveryEod > s.deliveryAvg6Month && s.deliveryAvgWeek >= minDeliveryPct && s.deliveryAvgMonth >= minDeliveryPct;
@@ -216,7 +239,7 @@
                         industry: map ? map.industry : (mappingFileName ? 'Uncategorized' : 'Pending Mapping')
                     };
                 });
-            }, [rawData, sectorIndustryMap, mappingFileName, minDeliveryPct, timeFrameMode, selectedDate, startDate, endDate, selectedMonth, selectedQuarter, selectedYear, searchQuery, activeStrategy]);
+            }, [rawData, sectorIndustryMap, mappingFileName, minDeliveryPct, timeFrameMode, selectedDate, startDate, endDate, selectedMonth, selectedQuarter, selectedYear, selectedWeek, selectedWeekYear, selectedRecentDays, searchQuery, activeStrategy]);
 
             const appearanceCounts = useMemo(() => {
                 const c = {}; filteredData.forEach(s => c[s.nseCode] = (c[s.nseCode] || 0) + 1); return c;
@@ -299,20 +322,24 @@
                             </div>
                             <div className="xl:col-span-9 card p-8">
                                 <div className="flex flex-wrap gap-2 mb-6">
-                                    {['all', 'date', 'month', 'quarter', 'year', 'custom'].map(m => (
+                                    {['all', 'date', 'week', 'month', 'quarter', 'year', 'recent', 'custom'].map(m => (
                                         <button key={m} onClick={() => setTimeFrameMode(m)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${timeFrameMode === m ? 'bg-slate-800 text-white shadow-lg' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>{m}</button>
                                     ))}
                                 </div>
                                 <div className="flex flex-wrap items-end gap-4 min-h-[60px]">
                                     {timeFrameMode === 'date' && <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white shadow-sm" />}
-                                    {(timeFrameMode === 'month' || timeFrameMode === 'quarter' || timeFrameMode === 'year') && (
+                                    {(timeFrameMode === 'month' || timeFrameMode === 'quarter' || timeFrameMode === 'year' || timeFrameMode === 'week') && (
                                         <select value={selectedYear} onChange={e => setSelectedYear(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white shadow-sm">
                                             {[...new Set(rawData.map(d => d.date.split('-')[0]))].sort().map(y => <option key={y} value={y}>{y}</option>)}
                                         </select>
                                     )}
                                     {timeFrameMode === 'month' && <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white shadow-sm">{["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m, i) => <option key={m} value={i}>{m}</option>)}</select>}
                                     {timeFrameMode === 'quarter' && <select value={selectedQuarter} onChange={e => setSelectedQuarter(e.target.value)} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white shadow-sm"><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></select>}
+                                    {timeFrameMode === 'week' && (
+                                        <input type="number" min="1" max="53" value={selectedWeek} onChange={e => setSelectedWeek(Math.max(1, Math.min(53, Number(e.target.value))))} placeholder="Week #" className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white shadow-sm w-24" />
+                                    )}
                                     {timeFrameMode === 'custom' && <div className="flex gap-2"><input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-2 border rounded-xl bg-white shadow-sm text-sm" /><input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-2 border rounded-xl bg-white shadow-sm text-sm" /></div>}
+                                    {timeFrameMode === 'recent' && <select value={selectedRecentDays} onChange={e => setSelectedRecentDays(Number(e.target.value))} className="font-bold text-sm p-2 rounded-xl border border-slate-100 bg-white shadow-sm"><option value="7">Last 7 dates</option><option value="30">Last 30 dates</option><option value="90">Last 90 dates</option><option value="180">Last 180 dates</option></select>}
                                     {timeFrameMode === 'all' && <p className="text-sm font-bold text-slate-300 italic px-2">Scanning {rawData.length} historical snapshots...</p>}
                                 </div>
                             </div>
@@ -320,14 +347,15 @@
 
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
                             {[
-                                { id: 'momentum', label: 'Momentum', icon: '🚀', desc: 'SMA Trends', color: 'blue' },
-                                { id: 'reversion', label: 'Reversion', icon: '⚡', desc: 'Mean Bounce', color: 'amber' },
-                                { id: 'volume', label: 'Volume', icon: '📊', desc: 'Unusual Del.', color: 'emerald' },
-                                { id: 'composite', label: 'Composite', icon: '⭐', desc: 'Best Overall', color: 'violet' }
+                                { id: 'momentum', label: 'Momentum', icon: '🚀', desc: 'SMA Trends', color: 'blue', logic: 'Trend-following: Price > SMA200/50, Rising SMAs, Positive price change (min 4 signals)' },
+                                { id: 'reversion', label: 'Reversion', icon: '⚡', desc: 'Mean Bounce', color: 'amber', logic: 'Mean reversion: Price < SMA200/50, High delivery accumulation despite weakness (min 2 signals)' },
+                                { id: 'volume', label: 'Volume', icon: '📊', desc: 'Unusual Del.', color: 'emerald', logic: 'Volume surge: Delivery > week/month avg or > 70%, indicating institutional buying (min 3 signals)' },
+                                { id: 'composite', label: 'Composite', icon: '⭐', desc: 'Best Overall', color: 'violet', logic: 'Blended score: 40% Momentum + 40% Reversion + 20% Volume (min score 3.0)' }
                             ].map(s => (
-                                <button 
-                                    key={s.id} 
+                                <button
+                                    key={s.id}
                                     onClick={() => setActiveStrategy(activeStrategy === s.id ? 'none' : s.id)}
+                                    title={s.logic}
                                     className={`strategy-btn p-6 rounded-[2rem] border text-left flex items-start gap-4 ${activeStrategy === s.id ? `bg-${s.color}-600 border-${s.color}-600 strategy-active` : 'bg-white border-slate-100 hover:border-slate-300 shadow-sm'}`}
                                 >
                                     <span className="text-3xl">{s.icon}</span>
